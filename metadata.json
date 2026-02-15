@@ -1,0 +1,5 @@
+{
+  "name": "EXO skeleton ROBO arm .",
+  "description": "A sci-fi holographic interface for controlling and diagnosing a robotic servo arm system with real-time analytics and 3D visualization.",
+  "requestFramePermissions": []
+}
