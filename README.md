@@ -50,7 +50,7 @@ The core safety mechanism relies on a logical **AND** gate. The system will only
 If *either* condition fails (e.g., a sensor spike or the operator disables the system), the arm immediately locks down into a `CRITICAL` or `STANDBY` state.
 
 ## 📦 Getting Started
-
+see live web-app:https://exo-skeleton-rob-arm.vercel.app/
 ### Prerequisites
 
 -   Node.js (v16 or higher)
