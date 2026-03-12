@@ -1,26 +1,48 @@
 export enum SystemStatus {
   NOMINAL = 'NOMINAL',
   CRITICAL = 'CRITICAL FAILURE',
-  REBOOTING = 'REBOOTING...'
+  REBOOTING = 'REBOOTING...',
+  GESTURE_LOSS = 'GESTURE LOSS'
 }
 
 export type ViewMode = 'wireframe' | 'realistic';
+export type GestureMode = 'DISABLED' | 'SHADOW' | 'LIVE';
+
+export interface JointState {
+  j1: number; // Base
+  j2: number; // Shoulder
+  j3: number; // Elbow
+  j4: number; // Gripper
+}
+
+export interface CalibrationProfile {
+  offsets: JointState;
+  minMax: {
+    j1: [number, number];
+    j6: [number, number];
+  };
+}
 
 export interface SystemState {
   power: boolean;
-  servoAngle: number;
+  servoAngle: number; // Legacy position (main arm angle)
+  joints: JointState; // 6-DOF State
+  ghostJoints: JointState; // Preview State for SHADOW mode
   safetyThreshold: number;
-  objectPosition: number; // New: Position of the physical obstacle (0-100)
   pressure: number; // Simulated contact force (0-100%)
-  // New Sensors for Multi-Trip Mode
   heat: number; // 0-100
   vibration: number; // 0-100
   manualHeat: number; // User setpoint for simulation
   manualVibration: number; // User setpoint for simulation
-  manualPermissive: boolean; // New: For AND Gate Logic
+  manualPermissive: boolean; // For AND Gate Logic
   status: SystemStatus;
-  torqueHistory: { time: number; value: number }[];
   viewMode: ViewMode;
   isTactileMode: boolean;
-  isSerialConnected: boolean; // New: Hardware connection status
+  isSerialConnected: boolean; // Hardware connection status
+  // Gesture System State
+  gestureMode: GestureMode;
+  gestureConfidence: number;
+  isCalibrated: boolean;
+  gestureSmoothing: number;
+  isGestureFrozen: boolean;
 }

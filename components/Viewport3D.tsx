@@ -1,48 +1,37 @@
 import React, { useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { 
-  Grid, 
-  OrbitControls, 
-  RoundedBox, 
+import {
+  Grid,
+  OrbitControls,
+  RoundedBox,
   Cylinder,
   Box,
   Sphere,
-  Environment,
-  Text,
-  Plane
+  Environment as DreiEnvironment,
 } from '@react-three/drei';
 import * as THREE from 'three';
-import { SystemStatus, ViewMode } from '../types';
+import { SystemStatus, ViewMode, JointState, GestureMode } from '../types';
 
 interface Viewport3DProps {
-  angle: number;
+  joints: JointState;
+  ghostJoints?: JointState;
   status: SystemStatus;
   power: boolean;
   viewMode: ViewMode;
   pressure: number;
-  isTactileMode: boolean; 
-  objectPosition: number; // Received from App
+  threshold: number;
+  isTactileMode: boolean;
+  gestureMode: GestureMode;
 }
 
-// ==========================================
-// SHARED CONSTANTS
-// ==========================================
-const COLOR_BODY_REAL = "#151515";    
-const COLOR_ACCENT_REAL = "#f1c40f";  
-const COLOR_CHROME_REAL = "#b0b0b0"; 
+const COLOR_BODY_REAL = "#222222"; // Industrial Dark Gray
+const COLOR_ACCENT_REAL = "#facc15"; // Safety Yellow (hex bolts / highlights)
+const COLOR_METAL = "#444444";
+const COLOR_HYDRAULIC = "#888888";
 
-const COLOR_HOLO_CYAN = "#00f0ff"; 
+const COLOR_HOLO_CYAN = "#00f0ff";
 const COLOR_HOLO_RED = "#ff003c";
-const COLOR_HOLO_ORANGE = "#ffaa00";
 const COLOR_HOLO_DIM = "#003344";
-
-// ==========================================
-// MATERIALS
-// ==========================================
-
-const RealisticBodyMaterial = () => <meshStandardMaterial color={COLOR_BODY_REAL} metalness={0.6} roughness={0.4} />;
-const RealisticAccentMaterial = () => <meshStandardMaterial color={COLOR_ACCENT_REAL} metalness={0.3} roughness={0.4} />;
-const RealisticChromeMaterial = () => <meshStandardMaterial color={COLOR_CHROME_REAL} metalness={0.9} roughness={0.1} />;
 
 const HoloMaterial: React.FC<{ color: string, opacity?: number, blink?: boolean }> = ({ color, opacity = 0.6, blink = false }) => {
   const ref = useRef<THREE.MeshBasicMaterial>(null);
@@ -52,312 +41,256 @@ const HoloMaterial: React.FC<{ color: string, opacity?: number, blink?: boolean 
     }
   });
   return (
-    <meshBasicMaterial 
+    <meshBasicMaterial
       ref={ref}
-      color={color} 
-      wireframe 
-      transparent 
-      opacity={opacity} 
-      toneMapped={false} 
+      color={color}
+      wireframe
+      transparent
+      opacity={opacity}
+      toneMapped={false}
       blending={THREE.AdditiveBlending}
       side={THREE.DoubleSide}
     />
   );
 };
 
-// ==========================================
-// HELPER GEOMETRIES
-// ==========================================
-
-const RealisticPiston: React.FC<{ length: number }> = ({ length }) => (
-  <group>
-    <mesh position={[0, length / 2, 0]}>
-       <cylinderGeometry args={[0.15, 0.15, length, 16]} />
-       <meshStandardMaterial color="#0a0a0a" metalness={0.8} roughness={0.2} />
-    </mesh>
-    <mesh position={[0, length + 0.5, 0]}>
-       <cylinderGeometry args={[0.08, 0.08, length, 16]} />
-       <RealisticChromeMaterial />
-    </mesh>
-  </group>
-);
-
-const RealisticJointCap: React.FC<{ position: [number, number, number], rotation?: [number, number, number] }> = ({ position, rotation = [0, 0, Math.PI/2] }) => (
-  <mesh position={position} rotation={rotation}>
-    <cylinderGeometry args={[0.35, 0.35, 0.2, 32]} />
-    <RealisticAccentMaterial />
-  </mesh>
-);
-
-const WireframeJointNode: React.FC<{ color: string, scale?: number }> = ({ color, scale = 1 }) => (
-  <mesh scale={scale}>
-    <sphereGeometry args={[0.2, 16, 16]} />
-    <meshBasicMaterial color={color} transparent opacity={0.8} toneMapped={false} />
-  </mesh>
-);
-
-// Hazard Wall - REPLACES HazardObstacle
-const HazardWall: React.FC<{ isColliding: boolean, angle: number }> = ({ isColliding, angle }) => {
-  // We use the same rotation multiplier as the shoulder (0.9) to sync the coordinate space.
-  // Visual Offset: We add 8 degrees to ensure the wall sits physically outside the arm's mesh radius.
-  // The arm has thickness, so we need gap + thickness.
-  
-  const rotationAngle = angle * 0.9; 
-  const visualOffset = 8; 
-  const rad = THREE.MathUtils.degToRad(rotationAngle + visualOffset); 
-  
-  // Radius increased to 8.5 to sit near end-effector/gripper path
-  const radius = 8.5; 
-  
-  const y = 1 + radius * Math.cos(rad);
-  const z = radius * Math.sin(rad);
-
-  return (
-    <group position={[0, y, z]} rotation={[-rad, 0, 0]}>
-      {/* Wall Plate */}
-      <Box args={[6, 4, 0.2]}> 
-         <meshStandardMaterial 
-            color={isColliding ? "#ff0000" : "#ff8800"} 
-            emissive={isColliding ? "#ff0000" : "#ff4400"}
-            emissiveIntensity={isColliding ? 2 : 0.5}
-            transparent 
-            opacity={0.4}
-            metalness={0.8}
-            roughness={0.2}
-         />
-      </Box>
-      
-      {/* Structural Frame */}
-      <Box args={[6.2, 4.2, 0.1]} position={[0,0,-0.1]}>
-         <meshStandardMaterial color="#333" />
-      </Box>
-
-      {/* Warning Stripes */}
-      <Plane args={[6, 4]} position={[0, 0, 0.11]}>
-         <meshBasicMaterial 
-            color={isColliding ? "#ff0000" : "#ffaa00"} 
-            transparent 
-            opacity={0.2} 
-            wireframe
-         />
-      </Plane>
-      
-      {/* Impact Flash Visual */}
-      {isColliding && (
-          <mesh position={[0, 0, -1]}>
-              <sphereGeometry args={[1.5, 16, 16]} />
-              <meshBasicMaterial color="white" transparent opacity={0.5} />
-          </mesh>
-      )}
-
-      <Text 
-        position={[0, 2.5, 0]} 
-        fontSize={0.4} 
-        color={isColliding ? "white" : "orange"}
-        anchorX="center" 
-        anchorY="middle"
-      >
-        {!isColliding ? "DANGER ZONE" : "IMPACT DETECTED"}
-      </Text>
-    </group>
-  );
-};
-
-// ==========================================
-// ROBOT IMPLEMENTATIONS
-// ==========================================
-
-const Robot: React.FC<{ 
-  mode: ViewMode; 
-  angle: number; 
-  isCritical: boolean; 
+const Robot: React.FC<{
+  mode: ViewMode;
+  joints: JointState;
+  isCritical: boolean;
   hasPower: boolean;
   isTactileMode: boolean;
-}> = ({ mode, angle, isCritical, hasPower, isTactileMode }) => {
+  opacity?: number;
+}> = ({ mode, joints, isCritical, hasPower, isTactileMode, opacity = 1.0 }) => {
   const groupRef = useRef<THREE.Group>(null);
   const isWireframe = mode === 'wireframe';
 
-  // --- Rotations ---
-  const shoulderRotation = THREE.MathUtils.degToRad(angle * 0.9);
-  const elbowRotation = THREE.MathUtils.degToRad(angle * 0.7);
-  const wristRotation = THREE.MathUtils.degToRad(angle * 0.5);
+  // Mapping
+  const j1Rot = THREE.MathUtils.degToRad(joints.j1 - 90);
+  const j2Rot = THREE.MathUtils.degToRad(joints.j2 - 90);
+  const j3Rot = THREE.MathUtils.degToRad(joints.j3 - 90);
+  const j4Pinch = joints.j4 / 180;
 
-  // --- Colors Update for Tactile Mode ---
-  // If Tactile Mode is ON, use Orange as the main color, otherwise Cyan
-  const baseColor = isTactileMode ? COLOR_HOLO_ORANGE : COLOR_HOLO_CYAN;
-  
-  const holoMain = isCritical ? COLOR_HOLO_RED : (hasPower ? baseColor : COLOR_HOLO_DIM);
-  const holoAccent = isCritical ? "#ff5555" : (hasPower ? (isTactileMode ? "#ffcc00" : "#00ffff") : "#002233");
+  const holoMain = isCritical ? COLOR_HOLO_RED : (hasPower ? COLOR_HOLO_CYAN : COLOR_HOLO_DIM);
 
   useFrame((state) => {
     if (!groupRef.current) return;
-    const t = state.clock.elapsedTime;
-    groupRef.current.position.y = -2 + Math.sin(t * 0.5) * 0.05;
     if (isCritical) {
       groupRef.current.position.x = (Math.random() - 0.5) * 0.05;
+      groupRef.current.position.z = (Math.random() - 0.5) * 0.05;
+    } else {
+        groupRef.current.position.x = 0;
+        groupRef.current.position.z = 0;
     }
   });
 
   return (
     <group ref={groupRef} position={[0, -2, 0]}>
-      {/* BASE */}
-      <group>
+      {/* ELEVATED BASE CHASSIS (Industrial with wheels) */}
+      <group position={[0, 0.4, 0]}>
         {isWireframe ? (
-          <>
-            <Cylinder args={[2.5, 3, 0.5, 8]} position={[0, 0.25, 0]}>
-               <HoloMaterial color={holoMain} opacity={0.2} />
-            </Cylinder>
-            <Cylinder args={[2.55, 3.05, 0.5, 8]} position={[0, 0.25, 0]}>
-               <HoloMaterial color={holoMain} opacity={0.5} />
-            </Cylinder>
-          </>
+          <Box args={[5, 0.8, 5]}>
+            <HoloMaterial color={holoMain} opacity={opacity * 0.2} />
+          </Box>
         ) : (
-          <>
-             <Box args={[4, 0.4, 4]} position={[0, 0.2, 0]}>
-                <RealisticBodyMaterial />
-             </Box>
-          </>
+          <group>
+            {/* Main Plate */}
+            <Box args={[4.5, 0.6, 4.5]}>
+              <meshStandardMaterial color={COLOR_BODY_REAL} metalness={0.9} roughness={0.1} />
+            </Box>
+            {/* 4 Wheels/Legs */}
+            {[[-2.1, -2.1], [2.1, -2.1], [-2.1, 2.1], [2.1, 2.1]].map((pos, i) => (
+              <group key={i} position={[pos[0], -0.2, pos[1]]}>
+                <Cylinder args={[0.5, 0.5, 0.4, 16]} rotation={[0, 0, Math.PI / 2]}>
+                  <meshStandardMaterial color="#111" metalness={0.5} roughness={0.8} />
+                </Cylinder>
+              </group>
+            ))}
+          </group>
         )}
       </group>
 
-      {/* ARM ASSEMBLY */}
-      <group position={[0, 1, 0]}>
-         {isWireframe ? (
-            <Cylinder args={[1, 1.2, 1.5, 16]}><HoloMaterial color={holoMain} /></Cylinder>
-         ) : (
-            <mesh position={[0, -0.2, 0]}><cylinderGeometry args={[0.9, 1.0, 1.2, 32]} /><RealisticBodyMaterial /></mesh>
-         )}
+      {/* ROTATING BASE PEDESTAL */}
+      <group position={[0, 1.2, 0]} rotation={[0, -j1Rot, 0]}>
+        {isWireframe ? (
+          <Cylinder args={[1.5, 1.8, 1, 16]}>
+            <HoloMaterial color={holoMain} opacity={opacity * 0.3} />
+          </Cylinder>
+        ) : (
+          <Cylinder args={[1.2, 1.4, 1, 32]}>
+            <meshStandardMaterial color={COLOR_BODY_REAL} metalness={0.8} roughness={0.2} />
+          </Cylinder>
+        )}
 
-         {/* SHOULDER */}
-         <group position={[0, 1.0, 0]}>
-             {isWireframe && <WireframeJointNode color={holoAccent} scale={1.5} />}
-             
-             <group rotation={[shoulderRotation, 0, 0]}>
-                <group rotation={[0, 0, Math.PI/2]}>
-                   {isWireframe ? (
-                     <Cylinder args={[0.8, 0.8, 2, 16]}><HoloMaterial color={holoMain} /></Cylinder>
-                   ) : (
-                     <><mesh><cylinderGeometry args={[0.6, 0.6, 1.6, 32]} /><RealisticBodyMaterial /></mesh><RealisticJointCap position={[0, 0.81, 0]} rotation={[0,0,0]}/><RealisticJointCap position={[0, -0.81, 0]} rotation={[0,0,0]}/></>
-                   )}
+        {/* SHOULDER ASSEMBLY */}
+        <group position={[0, 1, 0]} rotation={[j2Rot, 0, 0]}>
+          {/* Main Joint Hub */}
+          <group rotation={[0, 0, Math.PI / 2]}>
+             {isWireframe ? (
+               <Cylinder args={[0.8, 0.8, 2.2, 8]}>
+                 <HoloMaterial color={holoMain} opacity={opacity} />
+               </Cylinder>
+             ) : (
+               <group>
+                 <Cylinder args={[0.7, 0.7, 2, 32]}>
+                   <meshStandardMaterial color="#333" metalness={1} roughness={0.1} />
+                 </Cylinder>
+                 {/* Yellow Hex Bolt Details */}
+                 <Cylinder args={[0.2, 0.2, 2.2, 6]} position={[0, 0, 0]}>
+                   <meshStandardMaterial color={COLOR_ACCENT_REAL} emissive={COLOR_ACCENT_REAL} emissiveIntensity={0.5} />
+                 </Cylinder>
+               </group>
+             )}
+          </group>
+
+          {/* LOWER ARM (HYDRAULIC LOOK) */}
+          <group position={[0, 1.5, 0]}>
+            {isWireframe ? (
+              <Box args={[0.8, 3, 0.8]}><HoloMaterial color={holoMain} opacity={opacity * 0.4} /></Box>
+            ) : (
+              <group>
+                <RoundedBox args={[0.7, 3.2, 1.2]} radius={0.05} smoothness={4}>
+                  <meshStandardMaterial color={COLOR_BODY_REAL} />
+                </RoundedBox>
+                {/* Visual Hydraulic Cylinder */}
+                <group position={[0, -1, 0.7]} rotation={[-0.2, 0, 0]}>
+                   <Cylinder args={[0.15, 0.15, 2, 16]}>
+                     <meshStandardMaterial color={COLOR_HYDRAULIC} metalness={1} roughness={0.1} />
+                   </Cylinder>
                 </group>
+              </group>
+            )}
 
-                {/* LOWER ARM */}
-                <group position={[0, 2, 0]}>
-                   {isWireframe ? (
-                     <Box args={[1.2, 4, 1.2]}><HoloMaterial color={holoMain} /></Box>
-                   ) : (
-                     <group position={[0, -0.2, 0.2]}><RoundedBox args={[1.0, 3.8, 1.0]} radius={0.1} smoothness={4}><RealisticBodyMaterial /></RoundedBox><group position={[0.6, -1.0, -0.6]} rotation={[0.2, 0, 0]}><RealisticPiston length={1.5} /></group><group position={[-0.6, -1.0, -0.6]} rotation={[0.2, 0, 0]}><RealisticPiston length={1.5} /></group></group>
-                   )}
+            {/* J3: ELBOW */}
+            <group position={[0, 1.6, 0]} rotation={[j3Rot, 0, 0]}>
+              <group rotation={[0, 0, Math.PI / 2]}>
+                <Cylinder args={[0.5, 0.5, 1.4, 16]}>
+                   <meshStandardMaterial color={isWireframe ? holoMain : "#222"} transparent opacity={opacity} />
+                </Cylinder>
+              </group>
+              
+              {/* UPPER ARM / FOREARM */}
+              <group position={[0, 1.5, 0]}>
+                {isWireframe ? (
+                  <Cylinder args={[0.4, 0.5, 3, 12]}><HoloMaterial color={holoMain} opacity={opacity * 0.5} /></Cylinder>
+                ) : (
+                  <group>
+                    <Cylinder args={[0.3, 0.4, 3, 24]}>
+                      <meshStandardMaterial color={COLOR_BODY_REAL} metalness={0.7} />
+                    </Cylinder>
+                    {/* Metal Rod Detail */}
+                    <Cylinder args={[0.1, 0.1, 3.2, 8]} position={[0, 0, 0.3]}>
+                       <meshStandardMaterial color={COLOR_HYDRAULIC} metalness={1} />
+                    </Cylinder>
+                  </group>
+                )}
 
-                   {/* ELBOW */}
-                   <group position={[0, 2, 0]}>
-                       {isWireframe ? (
-                          <WireframeJointNode color={holoAccent} scale={1.2} />
-                       ) : (
-                          <group position={[0, -0.2, 0.5]}><mesh rotation={[0, 0, Math.PI/2]}><cylinderGeometry args={[0.5, 0.5, 1.4, 32]} /><RealisticBodyMaterial /></mesh><RealisticJointCap position={[0.71, 0, 0]} /><RealisticJointCap position={[-0.71, 0, 0]} /></group>
-                       )}
+                {/* WRIST / GRIPPER END EFFECTOR */}
+                <group position={[0, 1.5, 0]}>
+                  <Sphere args={[0.45, 16, 16]}>
+                    <meshStandardMaterial color={isWireframe ? holoMain : "#111"} metalness={1} />
+                  </Sphere>
 
-                       {/* UPPER ARM */}
-                       <group rotation={[elbowRotation, 0, 0]}>
-                           <group position={[0, 1.5, 0]}>
-                              {isWireframe ? (
-                                <Cylinder args={[0.5, 0.6, 3, 16]}><HoloMaterial color={holoMain} /></Cylinder>
-                              ) : (
-                                <Cylinder args={[0.3, 0.4, 3, 16]}><RealisticBodyMaterial /></Cylinder>
-                              )}
-
-                              {/* GRIPPER */}
-                              <group position={[0, 1.5, 0]}>
-                                  {isWireframe ? <Sphere args={[0.5, 16, 16]}><HoloMaterial color={holoAccent} /></Sphere> : <mesh><cylinderGeometry args={[0.4, 0.3, 0.6, 16]} /><meshStandardMaterial color="#222" /></mesh>}
-
-                                  <group rotation={[0, wristRotation, 0]} position={[0, isWireframe ? 0 : 0.4, 0]}>
-                                      {/* Fingers */}
-                                      {[0, 90, 180, 270].map((deg, i) => (
-                                          <group key={i} rotation={[0, THREE.MathUtils.degToRad(deg), 0]}>
-                                              <group position={[0.4, 0.5, 0]} rotation={[0, 0, -0.3]}>
-                                                  {isWireframe ? <Box args={[0.1, 1.0, 0.2]}><HoloMaterial color={holoMain} /></Box> : <Box args={[0.1, 0.6, 0.2]}><meshStandardMaterial color="#333" /></Box>}
-                                                  <group position={[0, isWireframe ? 0.5 : 0.3, 0]} rotation={[0, 0, isWireframe ? 0 : -0.4]}>
-                                                      <Box args={[0.1, 0.3, 0.2]} position={[0, 0.15, 0]}>
-                                                          {isWireframe ? <HoloMaterial color={holoAccent} blink={isCritical || (isTactileMode && angle > 80)} /> : <meshStandardMaterial color="#888" />}
-                                                      </Box>
-                                                  </group>
-                                              </group>
-                                          </group>
-                                      ))}
-                                  </group>
-                              </group>
-                           </group>
-                       </group>
-                   </group>
+                  {/* INDUSTRIAL GRIPPER */}
+                  <group position={[0, 0.6, 0]}>
+                    {[1, -1].map((side, i) => (
+                      <group key={i} position={[side * 0.3 * (1 - j4Pinch), 0.2, 0]} rotation={[0, 0, side * 0.4 * j4Pinch]}>
+                        <group>
+                           {/* Finger Clamp */}
+                           <Box args={[0.15, 1, 0.4]}>
+                             <meshStandardMaterial color={COLOR_METAL} metalness={1} />
+                           </Box>
+                           {/* Yellow Tip */}
+                           <Box args={[0.16, 0.2, 0.41]} position={[0, 0.4, 0]}>
+                             <meshStandardMaterial color={COLOR_ACCENT_REAL} />
+                           </Box>
+                        </group>
+                      </group>
+                    ))}
+                  </group>
                 </group>
-             </group>
-         </group>
+              </group>
+            </group>
+          </group>
+        </group>
       </group>
     </group>
   );
 };
 
-export const Viewport3D: React.FC<Viewport3DProps> = (props) => {
-  const { viewMode, isTactileMode, angle } = props;
-  const isWireframe = viewMode === 'wireframe';
-  const bgColor = isWireframe ? "#050505" : "#111";
-  const gridColor = isWireframe ? "#004455" : "#333";
+// 3D Boundary Indicator for Safety Threshold
+const SafetyZoneIndictor: React.FC<{ threshold: number; power: boolean }> = ({ threshold, power }) => {
+  const radius = (threshold / 180) * 8; // Scale for visual fit
+  
+  return (
+    <group position={[0, -0.1, 0]}>
+      {/* Outer Boundary Ring */}
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[radius, 0.03, 16, 100]} />
+        <meshBasicMaterial color={power ? "#ff003c" : "#333"} opacity={0.4} transparent />
+      </mesh>
+      
+      {/* Semi-transparent Danger Shell */}
+      <mesh>
+        <sphereGeometry args={[radius, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshBasicMaterial 
+          color="#ff003c" 
+          opacity={0.05} 
+          transparent 
+          wireframe
+        />
+      </mesh>
 
-  // Collision Logic (Derived from App state via angle/objectPosition)
-  // We use the same threshold logic as the App to ensure visual sync
-  const isColliding = props.pressure > 95;
+      {/* Origin Point Indicator */}
+      <mesh position={[0, 0, 0]}>
+        <sphereGeometry args={[0.2, 16, 16]} />
+        <meshBasicMaterial color="#ff003c" opacity={0.5} transparent />
+      </mesh>
+    </group>
+  );
+};
+
+const SceneObjects: React.FC<Viewport3DProps> = (props) => {
+  const { viewMode, joints, ghostJoints, gestureMode } = props;
+  const isWireframe = viewMode === 'wireframe';
+  const gridColor = isWireframe ? "#004455" : "#222";
 
   return (
-    <div className="w-full h-full bg-black relative overflow-hidden rounded-lg border border-cyan-900/30 shadow-inner">
-      {/* 3D Canvas */}
-      <Canvas shadows camera={{ position: [8, 6, 8], fov: 45 }}>
+    <>
+      <Grid infiniteGrid fadeDistance={40} sectionColor={gridColor} cellColor={gridColor} sectionThickness={1.5} />
+      <Robot mode={viewMode} joints={joints} isCritical={props.status === SystemStatus.CRITICAL} hasPower={props.power} isTactileMode={props.isTactileMode} />
+      {(gestureMode === 'SHADOW' || gestureMode === 'LIVE') && ghostJoints && (
+        <Robot mode={viewMode} joints={ghostJoints} isCritical={false} hasPower={true} isTactileMode={false} opacity={0.3} />
+      )}
+      {props.power && <SafetyZoneIndictor threshold={props.threshold} power={props.power} />}
+    </>
+  );
+};
+
+export const Viewport3D: React.FC<Viewport3DProps> = (props) => {
+  const isWireframe = props.viewMode === 'wireframe';
+  const bgColor = isWireframe ? "#020202" : "#0a0a0a";
+
+  return (
+    <div className="w-full h-full bg-black relative overflow-hidden rounded-lg border border-cyan-900/30">
+      <Canvas shadows camera={{ position: [12, 8, 12], fov: 35 }}>
         <color attach="background" args={[bgColor]} />
-        
-        {/* Lighting */}
-        <ambientLight intensity={isWireframe ? 0.2 : 0.5} />
-        <pointLight position={[10, 10, 10]} intensity={1} color="#00f0ff" />
-        <spotLight 
-            position={[0, 15, 0]} 
-            angle={0.6} 
-            penumbra={0.5} 
-            intensity={2} 
-            castShadow 
-            shadow-mapSize={[2048, 2048]}
-        />
-        
-        {!isWireframe && <Environment preset="city" />}
-
-        {/* Scene Objects */}
-        <Grid infiniteGrid fadeDistance={30} sectionColor={gridColor} cellColor={gridColor} />
-        
-        <Robot 
-            mode={props.viewMode} 
-            angle={props.angle} 
-            isCritical={props.status === SystemStatus.CRITICAL}
-            hasPower={props.power}
-            isTactileMode={props.isTactileMode}
-        />
-
-        {/* CONTROLS */}
-        <OrbitControls 
-            enablePan={false} 
-            minPolarAngle={0} 
-            maxPolarAngle={Math.PI / 2.2}
-            minDistance={5}
-            maxDistance={20}
-        />
+        <ambientLight intensity={isWireframe ? 0.3 : 1.2} />
+        <pointLight position={[10, 10, 10]} intensity={2.5} color="#ffffff" />
+        <pointLight position={[-15, 5, -10]} intensity={1.5} color="#00f0ff" />
+        <spotLight position={[5, 20, 5]} angle={0.4} penumbra={1} intensity={10} castShadow />
+        {!isWireframe && <DreiEnvironment preset="studio" />}
+        <SceneObjects {...props} />
+        <OrbitControls enablePan={false} minPolarAngle={0} maxPolarAngle={Math.PI / 2} minDistance={5} maxDistance={60} />
       </Canvas>
 
-      {/* OVERLAY UI */}
       <div className="absolute top-4 left-4 pointer-events-none">
-          <div className="flex flex-col gap-1">
-              <div className="text-[10px] text-cyan-500 font-bold tracking-[0.2em] uppercase">
-                  Digital Twin
-              </div>
-              <div className="text-xl font-black text-white tracking-tighter">
-                  {isWireframe ? 'WIREFRAME_VIEW' : 'REALISTIC_RENDER'}
-              </div>
+        <div className="flex flex-col gap-1 border-l-2 border-cyan-500 pl-3">
+          <div className="text-[10px] text-cyan-500/70 font-black tracking-[0.4em] uppercase font-mono">Industrial System</div>
+          <div className="text-2xl font-black text-white tracking-widest font-mono">
+            {isWireframe ? 'CORE_DEBUG' : 'PHYS_LINK_01'}
           </div>
+        </div>
       </div>
     </div>
   );

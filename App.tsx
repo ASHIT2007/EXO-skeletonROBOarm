@@ -1,428 +1,269 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { SystemStatus, SystemState } from './types';
+import { SystemStatus, SystemState, ViewMode, JointState, GestureMode } from './types';
 import { Viewport3D } from './components/Viewport3D';
 import { Controls } from './components/Controls';
 import { AnalyticsPanel } from './components/AnalyticsPanel';
 import { LogicPanel } from './components/LogicPanel';
 import { StatusBanner } from './components/StatusBanner';
 import { LandingPage } from './components/LandingPage';
+import { GestureMirrorSystem } from './components/GestureMirrorSystem';
+import { useGestureMirror } from './hooks/useGestureMirror';
 import { MAX_HISTORY_LENGTH } from './constants';
 
 const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  
   const [state, setState] = useState<SystemState>({
     power: true,
     servoAngle: 0,
-    safetyThreshold: 80,
-    objectPosition: 75, // Default object position
+    joints: { j1: 90, j2: 90, j3: 90, j4: 0 },
+    ghostJoints: { j1: 90, j2: 90, j3: 90, j4: 0 },
+    safetyThreshold: 175, // Increased default headroom
     pressure: 0,
-    heat: 30, // Normal operating temp
-    vibration: 10, // Normal vibration
-    manualHeat: 50, // User Setpoint for Automation
-    manualVibration: 30, // User Setpoint for Automation
+    heat: 30,
+    vibration: 10,
+    manualHeat: 50,
+    manualVibration: 30,
+    manualPermissive: false,
     status: SystemStatus.NOMINAL,
-    torqueHistory: Array(MAX_HISTORY_LENGTH).fill({ time: 0, value: 0 }),
     viewMode: 'wireframe',
-    isTactileMode: false, // Start in Standard Mode
-    isSerialConnected: false
+    isTactileMode: false,
+    isSerialConnected: false,
+    gestureMode: 'DISABLED',
+    gestureConfidence: 0,
+    isCalibrated: false,
+    gestureSmoothing: 0.2, 
+    isGestureFrozen: false
   });
 
-  // Refs for Web Serial to persist across renders without triggering them
+  const [angleHistory, setAngleHistory] = useState<{ time: number; value: number }[]>(
+    Array(MAX_HISTORY_LENGTH).fill({ time: 0, value: 0 })
+  );
+
+  // Initialize the new gesture mirror hook with jump prevention sync
+  const { 
+    videoRef, 
+    canvasRef, 
+    jointAngles, 
+    isTracking, 
+    confidence, 
+    mode: mirrorMode, 
+    setMode: setMirrorMode 
+  } = useGestureMirror(state.joints);
+
   const serialPortRef = useRef<any>(null);
   const writerRef = useRef<WritableStreamDefaultWriter<string> | null>(null);
+  const thresholdTimerRef = useRef<number | null>(null);
 
-  // ==========================================
-  // WEB SERIAL API INTEGRATION
-  // ==========================================
-  
-  // Handle physical disconnection events
+  // Sync state with gesture system
   useEffect(() => {
-    const handleDisconnect = () => {
-        console.log("Hardware disconnected");
-        setState(prev => ({ ...prev, isSerialConnected: false }));
-        writerRef.current = null;
-        serialPortRef.current = null;
-    };
-
-    if ((navigator as any).serial) {
-        (navigator as any).serial.addEventListener('disconnect', handleDisconnect);
-    }
-    return () => {
-        if ((navigator as any).serial) {
-            (navigator as any).serial.removeEventListener('disconnect', handleDisconnect);
-        }
-    };
-  }, []);
-
-  const connectSerial = async () => {
-    // Cast navigator to any to avoid TypeScript errors with experimental Web Serial API
-    if (!(navigator as any).serial) {
-        alert("Web Serial API not supported in this browser. Try Chrome or Edge.");
-        return;
-    }
-
-    try {
-        const port = await (navigator as any).serial.requestPort();
-        await port.open({ baudRate: 9600 });
-        
-        serialPortRef.current = port;
-
-        // Setup Writer
-        const textEncoder = new TextEncoderStream();
-        const writableStreamClosed = textEncoder.readable.pipeTo(port.writable);
-        const writer = textEncoder.writable.getWriter();
-        writerRef.current = writer;
-
-        setState(prev => ({ ...prev, isSerialConnected: true }));
-
-        // Start Reading Loop
-        readLoop(port);
-
-    } catch (err) {
-        console.error("Error connecting to serial port:", err);
-    }
-  };
-
-  const readLoop = async (port: any) => {
-      const textDecoder = new TextDecoderStream();
-      const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
-      const reader = textDecoder.readable.getReader();
-      let buffer = "";
-
-      try {
-          while (true) {
-              const { value, done } = await reader.read();
-              if (done) break;
-              
-              buffer += value;
-              const lines = buffer.split('\n');
-              buffer = lines.pop() || ""; // Keep incomplete line in buffer
-
-              for (const line of lines) {
-                  const trimmed = line.trim();
-                  if (trimmed) {
-                      const sensorValue = parseInt(trimmed, 10);
-                      if (!isNaN(sensorValue)) {
-                          // Map Input (Approx 600-900) to Servo Angle (0-100)
-                          // We use a flexible mapping and clamp it
-                          const minInput = 600;
-                          const maxInput = 900;
-                          let mappedAngle = ((sensorValue - minInput) / (maxInput - minInput)) * 100;
-                          mappedAngle = Math.max(0, Math.min(100, mappedAngle));
-
-                          setState(prev => {
-                              // If reflex is active in tactile mode, hardware input is momentarily ignored
-                              if (prev.isTactileMode && prev.pressure > 20) return prev;
-                              
-                              // Tactile Mode Collision Physics Clamp
-                              if (prev.isTactileMode && mappedAngle > prev.objectPosition) {
-                                  mappedAngle = prev.objectPosition;
-                              }
-
-                              return { ...prev, servoAngle: mappedAngle };
-                          });
-                      }
-                  }
-              }
-          }
-      } catch (error) {
-          console.error("Read error or disconnect:", error);
-          setState(prev => ({ ...prev, isSerialConnected: false }));
-      } finally {
-          reader.releaseLock();
-      }
-  };
-
-  // ==========================================
-  // SIMULATION LOOP
-  // ==========================================
-  useEffect(() => {
-    if (!isLoggedIn) return;
-
-    const interval = setInterval(() => {
+    if (mirrorMode !== 'DISABLED') {
       setState(prev => {
-        if (!prev.power) return prev;
-        if (prev.status === SystemStatus.REBOOTING) return prev;
-
-        let newStatus = prev.status;
-        let newAngle = prev.servoAngle;
-        let newPressure = prev.pressure;
-        let signalChar = 'N'; // Nominal by default
+        // Persistent ALARM check: If any joint exceeds safetyThreshold, check persistence
+        const jointValues = Object.values(jointAngles);
+        const isExceeding = jointValues.some(v => v > state.safetyThreshold);
         
-        // ==========================================
-        // MODE 1: MULTI-SENSOR TRIP (OR Gate Logic) - AUTOMATED
-        // ==========================================
-        if (prev.isTactileMode) {
-            // 1. Simulate Automated Sensor Fluctuations (Sine Waves + Noise)
-            // Based on User Manual Setpoint
-            const time = Date.now() / 1000; // Seconds
-            const baseHeat = prev.manualHeat ?? 50;
-            const baseVib = prev.manualVibration ?? 30;
-            
-            // Heat: User Setpoint + Sine Wave + Noise
-            let autoHeat = baseHeat + (Math.sin(time * 0.5) * 10) + ((Math.random() - 0.5) * 5);
-            
-            // Vibration: User Setpoint + Sine Wave + Noise
-            let autoVib = baseVib + (Math.sin(time * 2) * 15) + ((Math.random() - 0.5) * 10);
-            
-            // Clamp values
-            autoHeat = Math.max(0, Math.min(120, autoHeat));
-            autoVib = Math.max(0, Math.min(100, autoVib));
-
-            // 2. Proximity Logic (Simple Distance, No Collision Wall)
-            const collisionAngle = prev.objectPosition;
-            let proximityValue = 0; 
-            
-            // Just a simple calculation, no hard stop or "wall" logic needed for visualization
-            if (newAngle > collisionAngle - 20) {
-                proximityValue = ((newAngle - (collisionAngle - 20)) / 20) * 100;
-            }
-            
-            // 3. AND GATE INTERLOCK LOGIC: 
-            // ACTIVE ONLY IF (Sensors Safe) AND (Manual Permissive ON)
-            const HEAT_LIMIT = 80;
-            const VIB_LIMIT = 80;
-            const PROX_LIMIT = 95;
-
-            const isHeatSafe = autoHeat <= HEAT_LIMIT;
-            const isVibSafe = autoVib <= VIB_LIMIT;
-            const isProxSafe = proximityValue <= PROX_LIMIT;
-            
-            const areSensorsSafe = isHeatSafe && isVibSafe && isProxSafe;
-            const isPermissiveOn = prev.manualPermissive; // User Control
-
-            if (!isPermissiveOn) {
-                newStatus = SystemStatus.CRITICAL; // Standby/Locked
-                signalChar = 'C';
-            } else if (!areSensorsSafe) {
-                newStatus = SystemStatus.CRITICAL; // Sensor Fault
-                signalChar = 'C';
-            } else {
-                newStatus = SystemStatus.NOMINAL; // Active
-                signalChar = 'N';
-            }
-
-            return {
-                ...prev,
-                status: newStatus,
-                servoAngle: newAngle,
-                pressure: proximityValue, 
-                heat: autoHeat, // Update with automated values
-                vibration: autoVib, // Update with automated values
-                torqueHistory: [...prev.torqueHistory, { time: Date.now(), value: newAngle + (Math.random() * 0.5) }].slice(-MAX_HISTORY_LENGTH)
-            };
-
-        // ==========================================
-        // MODE 2: STANDARD SAFETY MODE (Interlock System)
-        // ==========================================
+        if (isExceeding) {
+           if (!thresholdTimerRef.current) {
+             thresholdTimerRef.current = Date.now();
+           } else if (Date.now() - thresholdTimerRef.current > 500) {
+             if (prev.status !== SystemStatus.CRITICAL) {
+               return { ...prev, status: SystemStatus.CRITICAL };
+             }
+           }
         } else {
-            newPressure = 0; 
-            
-            // Logic: Compare Angle vs Threshold Slider
-            if (prev.status === SystemStatus.NOMINAL && prev.servoAngle > prev.safetyThreshold) {
-                newStatus = SystemStatus.CRITICAL; // Lock system
-                signalChar = 'C'; // Signal Critical
-            } else if (prev.status === SystemStatus.CRITICAL) {
-                signalChar = 'C';
-            }
+           thresholdTimerRef.current = null;
         }
 
-        // Update History
-        const sensorReading = newAngle + (Math.random() - 0.5) * 0.5;
-        const newHistory = [...prev.torqueHistory, { time: Date.now(), value: sensorReading }];
-        if (newHistory.length > MAX_HISTORY_LENGTH) newHistory.shift();
+        // If in critical state, do not update joints via gesture - require manual reset
+        if (prev.status === SystemStatus.CRITICAL) {
+          return { ...prev, gestureConfidence: confidence, gestureMode: mirrorMode };
+        }
 
-        // WRITER: Send Feedback to Arduino
-        // We do this inside the loop to ensure the physical twin matches the digital twin's safety state
-        if (prev.isSerialConnected && writerRef.current) {
-            writerRef.current.write(signalChar).catch(e => {
-                // Silent catch, error will be handled by readLoop or event listener
-            });
+        const shouldOverride = mirrorMode === 'LIVE' && isTracking;
+        const isMirroringActive = mirrorMode !== ('DISABLED' as GestureMode); 
+        
+        // Visual Warning Logic: Status is amber if close to threshold
+        let currentStatus = prev.status;
+        if (currentStatus === SystemStatus.NOMINAL && isExceeding) {
+          // Temporarily show that we are in a warning zone (could be handled via UI colors)
         }
 
         return {
           ...prev,
-          status: newStatus,
-          servoAngle: newAngle,
-          pressure: newPressure,
-          torqueHistory: newHistory
+          joints: shouldOverride ? jointAngles : prev.joints,
+          ghostJoints: jointAngles,
+          gestureConfidence: confidence,
+          gestureMode: mirrorMode,
+          status: (isTracking || !isMirroringActive) 
+            ? (prev.status === SystemStatus.GESTURE_LOSS ? SystemStatus.NOMINAL : prev.status) 
+            : SystemStatus.GESTURE_LOSS
         };
       });
-    }, 50);
+    } else {
+      setState(prev => ({ ...prev, gestureMode: 'DISABLED', gestureConfidence: 0 }));
+    }
+  }, [jointAngles, mirrorMode, confidence, isTracking]);
+
+  // Dedicated Serial Transmitter (Handles both gesture and manual)
+  useEffect(() => {
+    if (state.isSerialConnected && writerRef.current) {
+      const { j1, j2, j3, j4 } = state.joints;
+      const payload = `${Math.round(j1)},${Math.round(j2)},${Math.round(j3)},${Math.round(j4)}\n`;
+      writerRef.current.write(payload).catch(() => {});
+    }
+  }, [state.joints, state.isSerialConnected]);
+
+  // Live Telemetry Sampler (For Analytics Graph) - Optimized to separate state
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Access joints directly from the latest state reference if possible, 
+      // but since we are in an interval, we'll use a functional update for history
+      // We'll peek at the joints from the main state by using a ref if lag persists,
+      // but for now, we'll just sample the current 'state' variable which might be slightly stale but safer for React
+      const currentBending = Math.max(
+        state.joints.j1,
+        state.joints.j2,
+        state.joints.j3,
+        state.joints.j4
+      );
+      
+      setAngleHistory(prevHistory => {
+        return [...prevHistory, { 
+          time: Date.now(), 
+          value: currentBending 
+        }].slice(-MAX_HISTORY_LENGTH);
+      });
+    }, 100);
 
     return () => clearInterval(interval);
-  }, [isLoggedIn]);
+  }, [state.joints]); // Re-bind on joint change to keep sampler fresh
 
-  const handleReboot = () => {
-    setState(prev => ({ ...prev, status: SystemStatus.REBOOTING }));
-    setTimeout(() => {
-      setState(prev => ({
-        ...prev,
-        status: SystemStatus.NOMINAL,
-        servoAngle: 0,
-        pressure: 0,
-        torqueHistory: Array(MAX_HISTORY_LENGTH).fill({ time: 0, value: 0 })
-      }));
-    }, 2000);
-  };
-
-  const handlePowerToggle = () => {
-    setState(prev => ({ ...prev, power: !prev.power, status: !prev.power ? SystemStatus.NOMINAL : prev.status }));
-  };
-
-  const handleAngleChange = (val: number) => {
-    if (state.status === SystemStatus.CRITICAL || !state.power || state.status === SystemStatus.REBOOTING) return;
-    
-    // In Tactile Mode, if reflex is active, prevent manual override forward
-    if (state.isTactileMode && state.pressure > 20 && val > state.servoAngle) return;
-
-    let targetAngle = val;
-
-    // IMMEDIATE CLAMP
-    if (state.isTactileMode && targetAngle > state.objectPosition) {
-        targetAngle = state.objectPosition;
+  // Serial Connection Logic
+  const connectSerial = async () => {
+    if (!(navigator as any).serial) {
+      alert("Web Serial API not supported in this browser.");
+      return;
     }
-
-    setState(prev => ({ ...prev, servoAngle: targetAngle }));
+    try {
+      const port = await (navigator as any).serial.requestPort();
+      await port.open({ baudRate: 9600 });
+      serialPortRef.current = port;
+      const textEncoder = new TextEncoderStream();
+      textEncoder.readable.pipeTo(port.writable);
+      writerRef.current = textEncoder.writable.getWriter();
+      setState(prev => ({ ...prev, isSerialConnected: true }));
+    } catch (err) {
+      console.error("Connection failed", err);
+    }
   };
 
-  const handleThresholdChange = (val: number) => {
-    setState(prev => ({ ...prev, safetyThreshold: val }));
+  const handlePowerToggle = () => setState(prev => ({ ...prev, power: !prev.power }));
+  const handleReboot = () => setState(prev => ({ ...prev, status: SystemStatus.NOMINAL }));
+  const handleViewModeToggle = () => setState(prev => ({ ...prev, viewMode: prev.viewMode === 'wireframe' ? 'realistic' : 'wireframe' }));
+  const handleTactileModeToggle = () => setState(prev => ({ ...prev, isTactileMode: !prev.isTactileMode }));
+  const handlePermissiveToggle = () => setState(prev => ({ ...prev, manualPermissive: !prev.manualPermissive }));
+  const handleThresholdChange = (val: number) => setState(prev => ({ ...prev, safetyThreshold: val }));
+
+  const handleJointChange = (joint: keyof JointState, val: number) => {
+    setState(prev => ({
+      ...prev,
+      joints: { ...prev.joints, [joint]: val }
+    }));
   };
 
-  const handleHeatChange = (val: number) => {
-    setState(prev => ({ ...prev, manualHeat: val }));
-  };
-
-  const handleVibrationChange = (val: number) => {
-    setState(prev => ({ ...prev, manualVibration: val }));
-  };
-  
-  const handlePermissiveToggle = () => {
-    setState(prev => ({ ...prev, manualPermissive: !prev.manualPermissive }));
-  };
-
-  const handleObjectPositionChange = (val: number) => {
-      setState(prev => {
-          let adjustedServoAngle = prev.servoAngle;
-          if (prev.isTactileMode && prev.servoAngle > val) {
-              adjustedServoAngle = val;
-          }
-          return { 
-              ...prev, 
-              objectPosition: val,
-              servoAngle: adjustedServoAngle
-          };
-      });
-  };
-
-  const handleViewModeToggle = () => {
-    setState(prev => ({ ...prev, viewMode: prev.viewMode === 'wireframe' ? 'realistic' : 'wireframe' }));
-  };
-
-  const handleTactileModeToggle = () => {
-      setState(prev => ({ 
-          ...prev, 
-          isTactileMode: !prev.isTactileMode,
-          servoAngle: 0,
-          status: SystemStatus.NOMINAL,
-          pressure: 0,
-          objectPosition: 75 
-      }));
-  };
-
-  if (!isLoggedIn) {
-    return <LandingPage onLogin={() => setIsLoggedIn(true)} />;
-  }
-
-  const isReflexActive = state.isTactileMode && state.pressure > 20;
+  if (!isLoggedIn) return <LandingPage onLogin={() => setIsLoggedIn(true)} />;
 
   return (
-    <div className="relative w-screen h-screen bg-black overflow-hidden scanlines text-cyan-400 select-none">
-      <div className="absolute inset-0 z-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-900/50 via-black to-black"></div>
+    <div className="relative w-screen h-screen bg-black overflow-hidden scanlines text-cyan-400 select-none flex flex-col pt-16">
+      <StatusBanner
+        status={state.status}
+        isReflexActive={state.isTactileMode && state.pressure > 20}
+        isTactileMode={state.isTactileMode}
+        isSerialConnected={state.isSerialConnected}
+        heat={state.heat}
+        vibration={state.vibration}
+        pressure={state.pressure}
+        manualPermissive={state.manualPermissive}
+      />
 
-      {/* 3D Viewport Layer */}
       <div className="absolute inset-0 z-10">
-        <Viewport3D 
-          angle={state.servoAngle} 
-          status={state.status} 
-          power={state.power} 
+        <Viewport3D
+          joints={state.joints}
+          ghostJoints={state.ghostJoints}
+          status={state.status}
+          power={state.power}
           viewMode={state.viewMode}
           pressure={state.pressure}
+          threshold={state.safetyThreshold}
           isTactileMode={state.isTactileMode}
-          objectPosition={state.objectPosition}
+          gestureMode={state.gestureMode}
         />
       </div>
 
-      {/* UI Overlay Layer */}
-      <div className="absolute inset-0 z-20 pointer-events-none flex flex-col justify-between p-6">
-        
-        {/* Top Section */}
-        <div className="flex justify-between items-start w-full">
-          <div className="pointer-events-auto">
-            {/* Logic Panel changes based on mode */}
-            <LogicPanel 
-              power={state.power} 
-              status={state.status} 
-              isTactileMode={state.isTactileMode}
-              manualPermissive={state.manualPermissive}
-            heat={state.heat}
-            vibration={state.vibration}
-            pressure={state.pressure}
-            />
-          </div>
-          
-          <div className="pointer-events-auto">
-             <StatusBanner 
-                status={state.status} 
-                isReflexActive={isReflexActive} 
-                isTactileMode={state.isTactileMode} 
-                heat={state.heat}
-                vibration={state.vibration}
-                pressure={state.pressure}
-             />
-          </div>
+      <div className={`absolute left-4 top-24 z-30 pointer-events-auto transition-all duration-500`}>
+        <LogicPanel
+          power={state.power}
+          status={state.status}
+          gestureMode={state.gestureMode}
+          gestureConfidence={state.gestureConfidence}
+          isTactileMode={state.isTactileMode}
+          manualPermissive={state.manualPermissive}
+          heat={state.heat}
+          vibration={state.vibration}
+          pressure={state.pressure}
+        />
+      </div>
 
-          <div className="pointer-events-auto">
-            <AnalyticsPanel 
-                data={state.torqueHistory} 
-                status={state.status} 
-                threshold={state.isTactileMode ? state.objectPosition : state.safetyThreshold}
-                isTactileMode={state.isTactileMode}
-            />
-          </div>
-        </div>
+      <div className="absolute right-4 top-24 z-30 pointer-events-auto flex flex-col gap-4">
+        <AnalyticsPanel
+          data={angleHistory}
+          status={state.status}
+          threshold={state.safetyThreshold}
+          isTactileMode={state.isTactileMode}
+        />
+      </div>
 
-        {/* Bottom Section */}
-        <div className="pointer-events-auto mt-auto">
-          <Controls 
-            power={state.power}
-            servoAngle={state.servoAngle}
-            safetyThreshold={state.safetyThreshold}
-            objectPosition={state.objectPosition}
-            pressure={state.pressure}
-            heat={state.heat}
-            vibration={state.vibration}
-            manualHeat={state.manualHeat}
-            manualVibration={state.manualVibration}
-            manualPermissive={state.manualPermissive}
-            status={state.status}
-            viewMode={state.viewMode}
-            isTactileMode={state.isTactileMode}
-            isSerialConnected={state.isSerialConnected}
-            onPowerToggle={handlePowerToggle}
-            onAngleChange={handleAngleChange}
-            onThresholdChange={handleThresholdChange}
-            onObjectPositionChange={handleObjectPositionChange}
-            onHeatChange={handleHeatChange}
-            onVibrationChange={handleVibrationChange}
-            onPermissiveToggle={handlePermissiveToggle}
-            onReboot={handleReboot}
-            onViewModeToggle={handleViewModeToggle}
-            onTactileModeToggle={handleTactileModeToggle}
-            onConnect={connectSerial}
-          />
-        </div>
+      <GestureMirrorSystem
+        canvasRef={canvasRef}
+        videoRef={videoRef}
+        isTracking={isTracking}
+      />
+
+      <div className="absolute bottom-0 left-0 right-0 z-40 pointer-events-auto">
+        <Controls
+          power={state.power}
+          joints={state.joints}
+          gestureMode={state.gestureMode}
+          safetyThreshold={state.safetyThreshold}
+          pressure={state.pressure}
+          heat={state.heat}
+          vibration={state.vibration}
+          status={state.status}
+          viewMode={state.viewMode}
+          isTactileMode={state.isTactileMode}
+          isSerialConnected={state.isSerialConnected}
+          isTracking={isTracking}
+          onPowerToggle={handlePowerToggle}
+          onAngleChange={() => {}}
+          onJointChange={handleJointChange}
+          onThresholdChange={handleThresholdChange}
+          onHeatChange={() => {}}
+          onVibrationChange={() => {}}
+          onPermissiveToggle={handlePermissiveToggle}
+          onReboot={handleReboot}
+          onViewModeToggle={handleViewModeToggle}
+          onTactileModeToggle={handleTactileModeToggle}
+          onConnect={connectSerial}
+          onGestureModeToggle={() => {
+            const nextMode = mirrorMode === 'DISABLED' ? 'SHADOW' : mirrorMode === 'SHADOW' ? 'LIVE' : 'DISABLED';
+            setMirrorMode(nextMode);
+          }}
+          onGesturePanelToggle={() => setIsDrawerOpen(!isDrawerOpen)}
+          isDrawerOpen={isDrawerOpen}
+          servoAngle={state.servoAngle}
+        />
       </div>
     </div>
   );

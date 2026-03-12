@@ -1,241 +1,171 @@
 import React from 'react';
-import { SystemStatus, ViewMode } from '../types';
-import { Power, RefreshCw, AlertTriangle, Eye, Box, Zap, Scan, ShieldCheck, Link, Usb } from 'lucide-react';
+import { SystemStatus, ViewMode, JointState, GestureMode } from '../types';
+import { Power, RefreshCw, Eye, Box, Zap, Link, Usb, Settings } from 'lucide-react';
 
 interface ControlsProps {
   power: boolean;
   servoAngle: number;
+  joints: JointState;
+  gestureMode: GestureMode;
   safetyThreshold: number;
-  objectPosition: number;
   pressure: number;
-  heat: number; // Simulated
-  vibration: number; // Simulated
-  manualHeat?: number; // User Setpoint
-  manualVibration?: number; // User Setpoint
-  manualPermissive?: boolean; // New: For AND Gate Logic
+  heat: number;
+  vibration: number;
+  manualHeat?: number;
+  manualVibration?: number;
+  manualPermissive?: boolean;
   status: SystemStatus;
   viewMode: ViewMode;
   isTactileMode: boolean;
-  isSerialConnected: boolean; // New prop
+  isSerialConnected: boolean;
+  isTracking: boolean;
+  isDrawerOpen: boolean;
   onPowerToggle: () => void;
+  onJointChange: (joint: keyof JointState, val: number) => void;
   onAngleChange: (val: number) => void;
   onThresholdChange: (val: number) => void;
-  onObjectPositionChange: (val: number) => void;
-  onHeatChange: (val: number) => void; // New
-  onVibrationChange: (val: number) => void; // New
-  onPermissiveToggle?: () => void; // New
+  onHeatChange: (val: number) => void;
+  onVibrationChange: (val: number) => void;
+  onPermissiveToggle?: () => void;
   onReboot: () => void;
   onViewModeToggle: () => void;
   onTactileModeToggle: () => void;
-  onConnect: () => void; // New prop
+  onConnect: () => void;
+  onGestureModeToggle: () => void;
+  onGesturePanelToggle: () => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
   power,
-  servoAngle,
-  safetyThreshold,
-  objectPosition,
-  pressure,
-  heat,
-  vibration,
-  manualHeat,
-  manualVibration,
-  manualPermissive,
+  joints,
+  gestureMode,
   status,
   viewMode,
   isTactileMode,
   isSerialConnected,
   onPowerToggle,
-  onAngleChange,
-  onThresholdChange,
-  onObjectPositionChange,
-  onHeatChange,
-  onVibrationChange,
-  onPermissiveToggle,
   onReboot,
   onViewModeToggle,
   onTactileModeToggle,
-  onConnect
+  onConnect,
+  onGestureModeToggle,
+  onGesturePanelToggle,
+  isTracking,
+  onJointChange,
+  safetyThreshold,
+  onThresholdChange,
+  isDrawerOpen,
+  servoAngle
 }) => {
-  const isCritical = status === SystemStatus.CRITICAL;
+  const isCritical = status === SystemStatus.CRITICAL || status === SystemStatus.GESTURE_LOSS;
   const isRebooting = status === SystemStatus.REBOOTING;
-  const isReflexActive = pressure > 50;
+  const isGestureMirroring = gestureMode === 'LIVE' && isTracking;
 
   return (
-    <div className="w-full bg-black/80 border-t border-cyan-500/30 backdrop-blur-md p-4 flex flex-wrap gap-8 items-end justify-between shadow-[0_-5px_20px_rgba(0,240,255,0.1)]">
-      
-      {/* 1. Hardware Connection */}
-      <div className="flex flex-col gap-2 border-r border-cyan-900/50 pr-6">
-        <label className="text-xs tracking-widest text-cyan-500 font-bold uppercase">Digital Twin</label>
-        <button 
-          onClick={onConnect}
-          disabled={isSerialConnected}
-          className={`flex items-center gap-2 px-4 py-2 border transition-all duration-300
-            ${isSerialConnected 
-                ? 'bg-green-900/40 border-green-500 text-green-400 shadow-[0_0_15px_rgba(0,255,0,0.3)] cursor-default' 
-                : 'bg-gray-900/40 border-gray-600 text-gray-400 hover:text-white hover:border-white'
-            }`}
-        >
-          {isSerialConnected ? <Link size={18} /> : <Usb size={18} />}
-          <span className="font-bold">{isSerialConnected ? 'LINKED' : 'CONNECT HARDWARE'}</span>
-        </button>
-      </div>
+    <div className="w-full bg-black/90 border-t border-cyan-500/20 backdrop-blur-xl p-4 flex items-center justify-between shadow-[0_-10px_30px_rgba(0,0,0,0.8)]">
 
-      {/* 2. Simulation Mode Switcher */}
-      <div className="flex flex-col gap-2 border-r border-cyan-900/50 pr-6">
-        <label className="text-xs tracking-widest text-cyan-500 font-bold uppercase">Logic Mode</label>
-        <button 
-          onClick={onTactileModeToggle}
-          className={`flex items-center gap-2 px-4 py-2 border transition-all duration-300
-            ${isTactileMode 
-                ? 'bg-orange-900/40 border-orange-500 text-orange-400 shadow-[0_0_15px_rgba(255,165,0,0.3)]' 
-                : 'bg-cyan-900/40 border-cyan-500 text-cyan-300 shadow-[0_0_10px_rgba(0,240,255,0.3)]'
-            }`}
-        >
-          {isTactileMode ? <Zap size={18} /> : <ShieldCheck size={18} />}
-          <span className="font-bold">{isTactileMode ? 'AND GATE INTERLOCK' : 'LOGIC SAFETY'}</span>
-        </button>
-      </div>
-
-      {/* 3. Master Power */}
-      <div className="flex flex-col gap-2">
-        <label className="text-xs tracking-widest text-gray-500 font-bold uppercase">Power</label>
-        <button 
-          onClick={onPowerToggle}
-          className={`flex items-center gap-2 px-4 py-2 border ${power ? 'bg-gray-800 border-gray-600 text-green-400' : 'bg-gray-900 border-gray-700 text-gray-600'} transition-all`}
-        >
-          <Power size={18} />
-          <span>{power ? 'ON' : 'OFF'}</span>
-        </button>
-      </div>
-
-      {/* 4. Servo Angle (Main Control) */}
-      <div className="flex flex-col gap-2 flex-grow max-w-md">
-        <div className="flex justify-between text-xs font-bold uppercase tracking-widest">
-          <span className={isTactileMode ? "text-orange-500" : "text-cyan-500"}>
-             {isSerialConnected ? 'HARDWARE CONTROL' : 'MANUAL CONTROL'}
-          </span>
-          <span className="text-white">{servoAngle.toFixed(1)}°</span>
-        </div>
-        <div className="relative h-6 flex items-center">
-            <input 
-              type="range" 
-              min="0" 
-              max="100" 
-              step="0.1"
-              value={servoAngle}
-              onChange={(e) => onAngleChange(parseFloat(e.target.value))}
-              disabled={!power || isCritical || isRebooting || isSerialConnected}
-              className={`w-full h-2 bg-gray-900 appearance-none border border-gray-700 rounded-sm
-                ${isSerialConnected ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}
-                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-4 
-                [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-[0_0_10px_white]
-                disabled:opacity-50`}
-            />
-            {/* Visual Indicator */}
-            <div 
-                className={`absolute top-1/2 -translate-y-1/2 h-1 pointer-events-none ${isTactileMode ? 'bg-orange-500' : 'bg-cyan-500'}`} 
-                style={{ width: `${servoAngle}%`, left: 0 }}
-            ></div>
-        </div>
-      </div>
-
-      {/* 5. Variable Controls based on Mode */}
-      {isTactileMode ? (
-          // AND GATE LOGIC: User has ONE control (Master Permissive)
-          // Sensors are displayed but not controlled directly here (Automation visualized)
-          <div className="flex gap-4 animate-in fade-in slide-in-from-bottom-4 items-center">
-             
-             {/* AUTOMATED SENSOR STATUS (Read Only) */}
-             <div className="flex flex-col gap-1 w-32 opacity-80 pointer-events-none">
-                <div className="flex justify-between text-[10px] text-gray-400 font-bold uppercase tracking-widest">
-                    <span>SENSORS (AUTO)</span>
-                </div>
-                {/* Heat Bar */}
-                <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-orange-500 w-6">HEAT</span>
-                    <div className="flex-grow h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                        <div 
-                            className={`h-full transition-all duration-300 ${heat > 80 ? 'bg-red-500' : 'bg-orange-500'}`}
-                            style={{ width: `${Math.min(100, (heat/120)*100)}%` }}
-                        ></div>
-                    </div>
-                </div>
-                {/* Vib Bar */}
-                <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-purple-500 w-6">VIB</span>
-                    <div className="flex-grow h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                        <div 
-                            className={`h-full transition-all duration-300 ${vibration > 80 ? 'bg-red-500' : 'bg-purple-500'}`}
-                            style={{ width: `${Math.min(100, vibration)}%` }}
-                        ></div>
-                    </div>
-                </div>
-             </div>
-
-             {/* THE ONE CONTROL: MASTER PERMISSIVE */}
-             <button
-                onClick={onPermissiveToggle}
-                className={`flex flex-col items-center justify-center w-32 h-12 border rounded transition-all duration-200
-                    ${manualPermissive 
-                        ? 'bg-green-900/30 border-green-500 text-green-400 shadow-[0_0_15px_rgba(0,255,0,0.2)]' 
-                        : 'bg-gray-900 border-gray-600 text-gray-500 hover:border-gray-400'
-                    }`}
-             >
-                <span className="text-[10px] font-bold tracking-[0.2em] uppercase mb-0.5">OPERATOR</span>
-                <span className="text-sm font-black tracking-wider">{manualPermissive ? 'ENABLED' : 'DISABLED'}</span>
-             </button>
-
+      <div className="flex gap-4 border-r border-white/5 pr-6">
+        <div className="flex flex-col gap-1">
+          <label className="text-[9px] font-black uppercase tracking-[0.2em] text-gray-500 mb-1">Interfaces</label>
+          <div className="flex gap-2">
+            <button onClick={onConnect} disabled={isSerialConnected} className={`p-2 border rounded ${isSerialConnected ? 'bg-green-500/10 border-green-500/50 text-green-500' : 'bg-white/5 border-white/10 text-gray-500 hover:text-white'}`}>
+              {isSerialConnected ? <Link size={18} /> : <Usb size={18} />}
+            </button>
+            <button onClick={onTactileModeToggle} className={`p-2 border rounded ${isTactileMode ? 'bg-orange-500/10 border-orange-500/50 text-orange-400' : 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400'}`}>
+              <Zap size={18} />
+            </button>
+            <button onClick={onViewModeToggle} className={`p-2 border rounded ${viewMode === 'wireframe' ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-400' : 'bg-white/5 border-white/10 text-gray-400'}`}>
+              {viewMode === 'wireframe' ? <Eye size={18} /> : <Box size={18} />}
+            </button>
+            <button onClick={onGesturePanelToggle} className={`p-2 border rounded transition-all ${isDrawerOpen ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400' : 'bg-white/5 border-white/10 text-gray-400 hover:text-cyan-400'}`}>
+              <Settings size={18} />
+            </button>
           </div>
-      ) : (
-          // STANDARD MODE: Show Threshold Slider
-          <div className="flex flex-col gap-2 flex-grow max-w-xs animate-in fade-in slide-in-from-bottom-4">
-            <div className="flex justify-between text-xs text-cyan-500 font-bold uppercase tracking-widest">
-              <span>Safety Threshold</span>
-              <span>{safetyThreshold.toFixed(1)}°</span>
-            </div>
-            <div className="relative h-6 flex items-center">
+        </div>
+
+        <div className="flex flex-col gap-1 ml-4 pl-4 border-l border-white/5">
+          <label className="text-[9px] font-black uppercase tracking-[0.2em] text-gray-500 mb-1">Mirror Status</label>
+          <div className="flex bg-white/5 rounded p-0.5 border border-white/10">
+            {['DISABLED', 'SHADOW', 'LIVE'].map((m) => (
+              <button
+                key={m}
+                onClick={onGestureModeToggle}
+                className={`px-3 py-1 text-[8px] font-black uppercase transition-all duration-300 rounded-sm ${
+                  gestureMode === m 
+                  ? (m === 'LIVE' ? 'bg-red-500 text-white' : 'bg-cyan-500 text-black')
+                  : 'text-white/40 hover:text-white'
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className={`flex-grow flex gap-4 px-8 overflow-hidden transition-all duration-300 relative ${isGestureMirroring || isCritical ? 'opacity-30 grayscale-[0.8] pointer-events-none' : ''}`}>
+        {(isGestureMirroring || isCritical) && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/40 backdrop-blur-[2px] rounded">
+            <span className={`px-4 py-1 rounded text-[10px] font-black tracking-widest animate-pulse ${isCritical ? 'bg-red-600 text-white' : 'bg-cyan-500 text-black'}`}>
+              {isCritical ? 'SYSTEM_LOCKED_ALARM' : 'GESTURE_CONTROL_ACTIVE'}
+            </span>
+          </div>
+        )}
+        
+        <div className="flex gap-6 items-center">
+          {(Object.entries(joints) as [keyof JointState, number][]).map(([key, val]) => (
+            <div key={key} className="flex flex-col items-center group">
+              <span className="text-[8px] font-black text-white/30 uppercase tracking-[0.2em] mb-1 group-hover:text-cyan-500 transition-colors">{key}</span>
+              <div className="relative flex items-center gap-2 bg-white/5 px-2 py-1 rounded border border-white/5 hover:border-cyan-500/30 transition-all">
                 <input 
-                  type="range" 
-                  min="0" 
-                  max="100" 
-                  value={safetyThreshold}
-                  onChange={(e) => onThresholdChange(parseFloat(e.target.value))}
-                  className="w-full h-2 bg-gray-900 appearance-none cursor-pointer border border-gray-700 rounded-sm
-                    [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-4 
-                    [&::-webkit-slider-thumb]:bg-yellow-500 [&::-webkit-slider-thumb]:shadow-[0_0_5px_yellow]
-                    z-10 relative"
+                  type="range"
+                  min="0"
+                  max="180"
+                  value={val}
+                  disabled={!power || isCritical}
+                  onChange={(e) => onJointChange(key, parseInt(e.target.value))}
+                  className="w-16 h-1 bg-cyan-900/50 rounded-lg appearance-none cursor-pointer accent-cyan-500"
                 />
-                <div 
-                    className="absolute top-1/2 -translate-y-1/2 h-1 bg-red-900/60 pointer-events-none right-0" 
-                    style={{ width: `${100 - safetyThreshold}%` }}
-                ></div>
+                <span className={`text-[10px] font-mono font-bold w-6 text-right ${val > safetyThreshold ? 'text-red-500' : 'text-cyan-400'}`}>
+                  {Math.round(val)}°
+                </span>
+              </div>
             </div>
-          </div>
-      )}
-
-      {/* 6. Reboot / Visuals */}
-      <div className="flex flex-col gap-2">
-         <label className="text-xs tracking-widest text-gray-500 font-bold uppercase">System</label>
-         <div className="flex gap-2">
-             <button 
-                onClick={onViewModeToggle}
-                className="px-3 py-2 border bg-gray-900 border-gray-700 text-gray-400 hover:text-white"
-                title="Toggle View Mode"
-            >
-                {viewMode === 'wireframe' ? <Eye size={18} /> : <Box size={18} />}
-            </button>
-            <button 
-                onClick={onReboot}
-                disabled={!isCritical}
-                className={`flex items-center gap-2 px-4 py-2 border 
-                    ${isCritical ? 'bg-red-900/20 border-red-500 text-red-500 hover:bg-red-500 hover:text-black animate-pulse' : 'bg-gray-900/50 border-gray-800 text-gray-700 cursor-not-allowed'}`}
-            >
-                <RefreshCw size={18} className={isRebooting ? "animate-spin" : ""} />
-            </button>
-         </div>
+          ))}
+        </div>
       </div>
 
+      <div className="flex items-center gap-4 pl-8 border-l border-white/5 text-[10px] font-black uppercase">
+        <div className="flex flex-col items-end gap-1 px-4 group">
+             <span className="text-gray-600 tracking-tighter text-[8px] group-hover:text-cyan-500 transition-colors">Safety_Limit</span>
+             <div className="flex items-center gap-2">
+               <input 
+                 type="range"
+                 min="90"
+                 max="180"
+                 step="1"
+                 value={safetyThreshold}
+                 onChange={(e) => onThresholdChange(parseInt(e.target.value))}
+                 className="w-16 h-1 bg-red-900/50 rounded-lg appearance-none cursor-pointer accent-red-500"
+               />
+               <span className="text-white tracking-widest font-mono w-8 text-right">{safetyThreshold}°</span>
+             </div>
+        </div>
+        <button 
+           onClick={onReboot} 
+           disabled={!isCritical || isRebooting} 
+           className={`px-6 py-2 border rounded-sm font-black tracking-widest transition-all duration-500
+                ${isCritical 
+                   ? 'bg-red-600 border-red-400 text-white animate-pulse shadow-[0_0_20px_rgba(255,0,0,0.5)]' 
+                   : 'opacity-20 border-white/10 text-white/40 grayscale'}`}
+        >
+          {isRebooting ? <span className="flex items-center gap-2">REBOOTING... <RefreshCw size={14} className="animate-spin" /></span> : 'CLR_ESTOP_RESET'}
+        </button>
+        <button onClick={onPowerToggle} className={`h-14 px-6 border-2 flex flex-col items-center justify-center gap-1 rounded transition-colors ${power ? 'bg-red-600 border-red-500 hover:bg-red-700 shadow-[0_0_20px_rgba(255,0,0,0.2)]' : 'bg-green-600 border-green-500 hover:bg-green-700'}`}>
+          <Power size={24} />
+          <span className="text-[10px] font-black tracking-widest uppercase">{power ? 'ESTOP_KILL' : 'SYS_BOOT'}</span>
+        </button>
+      </div>
     </div>
   );
 };

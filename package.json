@@ -9,14 +9,17 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "lucide-react": "^0.563.0",
-    "recharts": "^3.7.0",
-    "react": "^19.2.4",
-    "three": "^0.182.0",
-    "react-dom": "^19.2.4",
-    "@react-three/fiber": "^9.5.0",
+    "@mediapipe/camera_utils": "^0.3.1675466862",
+    "@mediapipe/drawing_utils": "^0.3.1675466124",
+    "@mediapipe/hands": "^0.4.1675469240",
     "@react-three/drei": "^10.7.7",
-    "clsx": "^2.1.1"
+    "@react-three/fiber": "^9.5.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.563.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "recharts": "^3.7.0",
+    "three": "^0.182.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
