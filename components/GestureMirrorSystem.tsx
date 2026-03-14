@@ -7,7 +7,8 @@ interface GestureMirrorProps {
 }
 
 export const GestureMirrorSystem: React.FC<GestureMirrorProps> = ({ canvasRef, videoRef, isTracking }) => {
-  const [position, setPosition] = useState({ x: window.innerWidth - 280, y: window.innerHeight * 0.4 });
+  // Move feed back to the left side as requested
+  const [position, setPosition] = useState({ x: 20, y: 120 });
   const [isDragging, setIsDragging] = useState(false);
   const offset = useRef({ x: 0, y: 0 });
 
@@ -26,8 +27,7 @@ export const GestureMirrorSystem: React.FC<GestureMirrorProps> = ({ canvasRef, v
       const newX = e.clientX - offset.current.x;
       const newY = e.clientY - offset.current.y;
       
-      // Keep within bounds
-      const boundedX = Math.max(0, Math.min(newX, window.innerWidth - 240));
+      const boundedX = Math.max(0, Math.min(newX, window.innerWidth - 300));
       const boundedY = Math.max(0, Math.min(newY, window.innerHeight - 200));
       
       setPosition({ x: boundedX, y: boundedY });
@@ -50,7 +50,7 @@ export const GestureMirrorSystem: React.FC<GestureMirrorProps> = ({ canvasRef, v
 
   return (
     <div 
-      className="fixed z-[100] transition-shadow duration-300"
+      className="fixed z-[999] transition-shadow duration-300 pointer-events-auto"
       style={{ 
         left: `${position.x}px`, 
         top: `${position.y}px`,
@@ -67,13 +67,15 @@ export const GestureMirrorSystem: React.FC<GestureMirrorProps> = ({ canvasRef, v
           <div className="w-0.5 h-2 bg-current opacity-40" />
           <div className="w-0.5 h-2 bg-current opacity-40" />
         </div>
-        GESTURE_FEED_DRAG_HANDLE
+        GESTURE_FEED_LINK
       </div>
       
-      <div className={`relative w-[240px] h-[180px] bg-black border rounded overflow-hidden shadow-[0_0_20px_rgba(0,0,0,0.8)] transition-colors duration-300
+      <div className={`relative w-[280px] h-[210px] bg-black border rounded overflow-hidden shadow-[0_0_20px_rgba(0,0,0,0.8)] transition-colors duration-300
         ${isDragging ? 'border-cyan-400' : 'border-cyan-500/30'}`}>
-        {/* Hidden Video Source */}
+        
+        {/* Hidden Video Source with ID mapping */}
         <video 
+          id="gesture-video-source"
           ref={(el) => {
             if (videoRef) {
               (videoRef as any).current = el;
@@ -87,18 +89,28 @@ export const GestureMirrorSystem: React.FC<GestureMirrorProps> = ({ canvasRef, v
         {/* Visible Drawing Canvas */}
         <canvas 
           ref={canvasRef} 
-          width={240} 
-          height={180} 
-          className="w-full h-full"
+          width={280} 
+          height={210} 
+          className="w-full h-full object-contain"
         />
 
+        {/* Offline / Connection Warning */}
+        {!isTracking && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm">
+             <div className="text-[10px] font-black text-red-500 tracking-[0.3em] mb-2 animate-pulse">SYSTEM_FEED_OFFLINE</div>
+             <div className="text-[8px] text-gray-500 text-center px-4 leading-relaxed">
+               CHECK BROWSER PERMISSIONS<br/>OR HARDWARE CONNECTION
+             </div>
+          </div>
+        )}
+
         {/* Status Indicator */}
-        <div className="absolute top-2 right-2 flex items-center gap-1.5">
+        <div className="absolute top-2 right-2 flex items-center gap-1.5 z-50">
           <div className={`w-2 h-2 rounded-full ${isTracking ? 'bg-green-500 shadow-[0_0_8px_#10b981] animate-pulse' : 'bg-red-500 shadow-[0_0_8px_#ef4444]'}`} />
         </div>
 
         {/* Scanline Effect Overlay */}
-        <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,0,0,0.02),rgba(0,255,0,0.01),rgba(0,0,255,0.02))] bg-[length:100%_4px,3px_100%]" />
+        <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,0,0,0.02),rgba(0,255,0,0.01),rgba(0,0,255,0.02))] bg-[length:100%_4px,3px_100%] z-[60]" />
       </div>
     </div>
   );

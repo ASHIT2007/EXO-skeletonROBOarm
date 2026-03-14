@@ -1,7 +1,5 @@
 import React from 'react';
 import {
-  LineChart,
-  Line,
   YAxis,
   XAxis,
   ResponsiveContainer,
@@ -20,111 +18,134 @@ interface AnalyticsPanelProps {
   isTactileMode: boolean;
 }
 
-export const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({ data, status, threshold, isTactileMode }) => {
+export const AnalyticsPanel = React.memo<AnalyticsPanelProps>(({ data, status, threshold, isTactileMode }) => {
   const isCritical = status === SystemStatus.CRITICAL;
   const currentVal = data[data.length - 1]?.value || 0;
 
-  const mainColor = isTactileMode ? '#ffaa00' : THEME.cyan;
+  const mainColor = isTactileMode ? '#fbbf24' : THEME.cyan; // Amber or Cyan
   const limitColor = isTactileMode ? '#ffffff' : '#ff003c';
-  const labelText = isTactileMode ? 'OBSTACLE' : 'LIMIT';
+  const labelText = isTactileMode ? 'OBSTACLE_WARN' : 'SAFETY_LIMIT';
 
   const delta = threshold - currentVal;
-  const isApproaching = delta < 15 && delta > 0;
+  const isApproaching = delta < 20 && delta > 0;
 
   return (
-    <div className={`w-80 h-56 bg-black/80 border backdrop-blur-md p-4 flex flex-col shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-all duration-500 rounded-sm
-        ${isTactileMode ? 'border-orange-500/30' : 'border-cyan-500/30'}
-        ${isApproaching ? 'ring-1 ring-orange-500/50' : ''}`}>
+    <div className={`relative w-80 bg-black/40 border backdrop-blur-2xl p-5 flex flex-col shadow-[0_20px_50px_rgba(0,0,0,0.8)] transition-all duration-700 rounded-sm overflow-hidden
+        ${isTactileMode ? 'border-orange-500/40' : 'border-cyan-500/40'}
+        ${isApproaching ? 'ring-1 ring-orange-500/30' : ''}`}>
+      
+      {/* Decorative Corner Element */}
+      <div className={`absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 opacity-50 ${isTactileMode ? 'border-orange-500' : 'border-cyan-500'}`} />
 
-      {/* Header with improved typography */}
-      <div className={`flex justify-between items-start border-b pb-3 mb-3 ${isTactileMode ? 'border-orange-950' : 'border-cyan-950'}`}>
-        <div className="flex flex-col gap-1">
-          <span className={`text-[9px] uppercase tracking-[0.2em] font-black ${isTactileMode ? 'text-orange-500' : 'text-cyan-500'}`}>
-            Telemetry Flow
-          </span>
-          <span className={`text-[10px] font-bold tracking-tight text-white uppercase`}>
-            {isTactileMode ? 'Collision Physics' : 'Drive Angle Delta'}
+      {/* Header Section */}
+      <div className="flex justify-between items-start mb-6">
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className={`flex h-2 w-2 rounded-full animate-pulse ${isCritical ? 'bg-red-500 shadow-[0_0_8px_#ff003c]' : 'bg-green-500 shadow-[0_0_8px_#22c55e]'}`} />
+            <span className={`text-[8px] uppercase tracking-[0.3em] font-black ${isTactileMode ? 'text-orange-500/70' : 'text-cyan-500/70'}`}>
+              Live Telemetry Stream
+            </span>
+          </div>
+          <span className="text-sm font-black text-white/90 tracking-tighter uppercase font-mono">
+            {isTactileMode ? 'Collision_Vector_X' : 'Differential_Angle_Σ'}
           </span>
         </div>
 
-        <div className="text-right flex flex-col items-end">
-          <div className="text-2xl font-mono font-black italic tracking-tighter leading-none" style={{ color: isCritical ? THEME.red : (isApproaching ? '#ffaa00' : mainColor) }}>
+        <div className="text-right">
+          <div className={`text-3xl font-mono font-black tracking-tighter tabular-nums leading-none ${isCritical ? 'text-red-500' : (isApproaching ? 'text-orange-400' : 'text-white')}`}>
             {currentVal.toFixed(1)}°
           </div>
-          <div className={`text-[10px] font-bold mt-1 px-1.5 py-0.5 rounded ${delta < 0 ? 'bg-red-500 text-white' : 'bg-white/10 text-gray-400'}`}>
-            {delta >= 0 ? `+${delta.toFixed(1)}° TO ${labelText}` : `${Math.abs(delta).toFixed(1)}° OVER`}
+          <div className={`text-[9px] font-mono font-bold mt-2 uppercase tracking-tight ${delta < 0 ? 'text-red-400' : 'text-white/40'}`}>
+             Δ {delta.toFixed(1)}° {delta >= 0 ? 'Headroom' : 'Overrun'}
           </div>
         </div>
       </div>
 
-      {/* Chart Area with Shaded Safe Zone */}
-      <div className="flex-grow w-full relative mt-1">
+      {/* Chart Container */}
+      <div className="h-28 w-full relative group">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data}>
             <defs>
               <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={mainColor} stopOpacity={0.3} />
-                <stop offset="95%" stopColor={mainColor} stopOpacity={0} />
+                <stop offset="0%" stopColor={mainColor} stopOpacity={0.4} />
+                <stop offset="60%" stopColor={mainColor} stopOpacity={0.1} />
+                <stop offset="100%" stopColor={mainColor} stopOpacity={0} />
               </linearGradient>
             </defs>
+            
             <YAxis domain={[0, 200]} hide />
             <XAxis dataKey="time" hide />
 
-            {/* Shaded Safe Zone */}
-            <ReferenceArea
-              y1={0}
-              y2={threshold}
-              fill={mainColor}
-              fillOpacity={0.05}
-            />
-
-            {/* The Limit Line */}
             <ReferenceLine
               y={threshold}
               stroke={limitColor}
-              strokeDasharray="4 4"
-              strokeWidth={2}
-              label={{
-                value: labelText,
-                position: 'insideTopRight',
-                fill: limitColor,
-                fontSize: 9,
-                fontWeight: 'bold',
-                offset: 10
-              }}
+              strokeDasharray="3 3"
+              strokeWidth={1}
+              opacity={0.5}
             />
 
             <Area
               type="monotone"
               dataKey="value"
               stroke={mainColor}
-              strokeWidth={3}
+              strokeWidth={2}
               fillOpacity={1}
               fill="url(#colorVal)"
               isAnimationActive={false}
+              baseLine={0}
             />
           </AreaChart>
         </ResponsiveContainer>
 
-        {/* Warning Overlay */}
-        {isCritical && !isTactileMode && (
-          <div className="absolute inset-0 flex items-center justify-center bg-red-900/40 backdrop-blur-[2px] animate-pulse">
-            <span className="text-red-500 font-black tracking-[0.3em] text-[10px] border-2 border-red-500 px-3 py-1 bg-black shadow-[0_0_20px_rgba(255,0,0,0.5)]">
-              CRITICAL LIMIT EXCEEDED
+        {/* HUD-style Label Overlay */}
+        <div className="absolute top-0 left-0 text-[7px] font-mono text-white/20 uppercase tracking-widest vertical-text select-none">
+          Data_Scale: 0-200deg
+        </div>
+        
+        {isCritical && (
+          <div className="absolute inset-0 flex items-center justify-center bg-red-950/20 backdrop-blur-sm pointer-events-none border border-red-500/50">
+            <span className="text-[10px] font-black text-white bg-red-600 px-3 py-1 animate-bounce shadow-2xl">
+              SYSTEM_FAULT: LIMIT_EXCEEDED
             </span>
           </div>
         )}
       </div>
 
-      {/* Footer Info */}
-      <div className="mt-3 flex justify-between items-center opacity-40">
-        <div className="text-[8px] font-mono tracking-widest text-white uppercase">Buffer: {data.length}ms</div>
-        <div className="flex gap-1">
-          <div className={`w-1 h-1 rounded-full ${isCritical ? 'bg-red-500' : 'bg-green-500'}`}></div>
-          <div className="w-1 h-1 rounded-full bg-white/20"></div>
-          <div className="w-1 h-1 rounded-full bg-white/20"></div>
+      {/* Numerical Data Strip */}
+      <div className="mt-4 grid grid-cols-3 gap-2 border-t border-white/5 pt-3">
+        <div className="flex flex-col">
+          <span className="text-[7px] text-white/30 uppercase font-black tracking-wide">Min</span>
+          <span className="text-[10px] font-mono text-white/70">{(Math.min(...data.map(d => d.value)) ?? 0).toFixed(1)}</span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[7px] text-white/30 uppercase font-black tracking-wide">Max</span>
+          <span className="text-[10px] font-mono text-white/70">{(Math.max(...data.map(d => d.value)) ?? 0).toFixed(1)}</span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[7px] text-white/30 uppercase font-black tracking-wide">Avg</span>
+          <span className="text-[10px] font-mono text-white/70">
+            {(data.reduce((acc, d) => acc + d.value, 0) / (data.length || 1)).toFixed(1)}
+          </span>
+        </div>
+      </div>
+
+      {/* Footer System Info */}
+      <div className="mt-4 flex justify-between items-center">
+        <div className="flex gap-2 items-center">
+           <div className={`w-1.5 h-1.5 rounded-full ${isCritical ? 'bg-red-500 shadow-[0_0_5px_red]' : 'bg-cyan-500 shadow-[0_0_5px_cyan]'}`} />
+           <span className="text-[8px] font-mono tracking-widest text-white/30 uppercase">Node_Active: telemetry_ch_01</span>
+        </div>
+        <div className="text-[8px] font-mono text-white/20 uppercase">
+          {data.length > 0 ? new Date(data[data.length-1].time).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '00:00:00'}
         </div>
       </div>
     </div>
   );
-};
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.data.length === nextProps.data.length &&
+    prevProps.status === nextProps.status &&
+    prevProps.threshold === nextProps.threshold &&
+    prevProps.isTactileMode === nextProps.isTactileMode
+  );
+});

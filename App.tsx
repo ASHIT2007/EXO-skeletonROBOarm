@@ -50,61 +50,62 @@ const App: React.FC = () => {
     confidence, 
     mode: mirrorMode, 
     setMode: setMirrorMode 
-  } = useGestureMirror(state.joints);
+  } = useGestureMirror(state.joints, state.gestureSmoothing);
 
   const serialPortRef = useRef<any>(null);
   const writerRef = useRef<WritableStreamDefaultWriter<string> | null>(null);
   const thresholdTimerRef = useRef<number | null>(null);
 
-  // Sync state with gesture system
+  const latestJointsRef = useRef<JointState>(state.joints);
+  const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Throttled UI Sync (15fps) - Only syncs to state if mirroring is active
+  useEffect(() => {
+    syncIntervalRef.current = setInterval(() => {
+      if (mirrorMode !== 'DISABLED') {
+        setState(prev => {
+          // Only update state if values have actually changed significantly or if we need to sync for UI
+          // This prevents massive re-renders of the entire dashboard
+          const jointsChanged = JSON.stringify(prev.joints) !== JSON.stringify(latestJointsRef.current);
+          if (!jointsChanged && prev.gestureMode === mirrorMode) return prev;
+          
+          return {
+            ...prev,
+            joints: latestJointsRef.current,
+            gestureMode: mirrorMode,
+            gestureConfidence: confidence
+          };
+        });
+      }
+    }, 66); // ~15fps for UI/Serial updates
+
+    return () => {
+      if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+    };
+  }, [mirrorMode, confidence]);
+
+  // High-Frequency Data Feed (30fps+) - Direct to Ref
   useEffect(() => {
     if (mirrorMode !== 'DISABLED') {
+      const shouldOverride = mirrorMode === 'LIVE' && isTracking;
+      if (shouldOverride) {
+        latestJointsRef.current = jointAngles;
+      }
+
+      // Update GESTURE_LOSS status in state immediately if it changes
       setState(prev => {
-        // Persistent ALARM check: If any joint exceeds safetyThreshold, check persistence
-        const jointValues = Object.values(jointAngles);
-        const isExceeding = jointValues.some(v => v > state.safetyThreshold);
+        const isMirroringActive = mirrorMode !== ('DISABLED' as GestureMode);
+        const newStatus = (isTracking || !isMirroringActive) 
+          ? (prev.status === SystemStatus.GESTURE_LOSS ? SystemStatus.NOMINAL : prev.status) 
+          : SystemStatus.GESTURE_LOSS;
         
-        if (isExceeding) {
-           if (!thresholdTimerRef.current) {
-             thresholdTimerRef.current = Date.now();
-           } else if (Date.now() - thresholdTimerRef.current > 500) {
-             if (prev.status !== SystemStatus.CRITICAL) {
-               return { ...prev, status: SystemStatus.CRITICAL };
-             }
-           }
-        } else {
-           thresholdTimerRef.current = null;
-        }
-
-        // If in critical state, do not update joints via gesture - require manual reset
-        if (prev.status === SystemStatus.CRITICAL) {
-          return { ...prev, gestureConfidence: confidence, gestureMode: mirrorMode };
-        }
-
-        const shouldOverride = mirrorMode === 'LIVE' && isTracking;
-        const isMirroringActive = mirrorMode !== ('DISABLED' as GestureMode); 
-        
-        // Visual Warning Logic: Status is amber if close to threshold
-        let currentStatus = prev.status;
-        if (currentStatus === SystemStatus.NOMINAL && isExceeding) {
-          // Temporarily show that we are in a warning zone (could be handled via UI colors)
-        }
-
-        return {
-          ...prev,
-          joints: shouldOverride ? jointAngles : prev.joints,
-          ghostJoints: jointAngles,
-          gestureConfidence: confidence,
-          gestureMode: mirrorMode,
-          status: (isTracking || !isMirroringActive) 
-            ? (prev.status === SystemStatus.GESTURE_LOSS ? SystemStatus.NOMINAL : prev.status) 
-            : SystemStatus.GESTURE_LOSS
-        };
+        if (prev.status === newStatus) return prev;
+        return { ...prev, status: newStatus };
       });
     } else {
-      setState(prev => ({ ...prev, gestureMode: 'DISABLED', gestureConfidence: 0 }));
+      latestJointsRef.current = state.joints;
     }
-  }, [jointAngles, mirrorMode, confidence, isTracking]);
+  }, [jointAngles, mirrorMode, isTracking]);
 
   // Dedicated Serial Transmitter (Handles both gesture and manual)
   useEffect(() => {
@@ -115,18 +116,16 @@ const App: React.FC = () => {
     }
   }, [state.joints, state.isSerialConnected]);
 
-  // Live Telemetry Sampler (For Analytics Graph) - Optimized to separate state
+  // High-Precision Telemetry Sampler (For Analytics Graph)
   useEffect(() => {
     const interval = setInterval(() => {
-      // Access joints directly from the latest state reference if possible, 
-      // but since we are in an interval, we'll use a functional update for history
-      // We'll peek at the joints from the main state by using a ref if lag persists,
-      // but for now, we'll just sample the current 'state' variable which might be slightly stale but safer for React
-      const currentBending = Math.max(
-        state.joints.j1,
-        state.joints.j2,
-        state.joints.j3,
-        state.joints.j4
+      // Sum of absolute joint velocities/changes often feels more "real" for telemetry
+      // but here we'll use a weighted average of active joints for a smoother 'System Load' look
+      const currentBending = (
+        state.joints.j1 * 0.1 + 
+        state.joints.j2 * 0.4 + 
+        state.joints.j3 * 0.4 + 
+        state.joints.j4 * 0.1
       );
       
       setAngleHistory(prevHistory => {
@@ -135,10 +134,10 @@ const App: React.FC = () => {
           value: currentBending 
         }].slice(-MAX_HISTORY_LENGTH);
       });
-    }, 100);
+    }, 50); // 20Hz sampling for smoother flow
 
     return () => clearInterval(interval);
-  }, [state.joints]); // Re-bind on joint change to keep sampler fresh
+  }, [state.joints]); 
 
   // Serial Connection Logic
   const connectSerial = async () => {
@@ -260,6 +259,7 @@ const App: React.FC = () => {
             const nextMode = mirrorMode === 'DISABLED' ? 'SHADOW' : mirrorMode === 'SHADOW' ? 'LIVE' : 'DISABLED';
             setMirrorMode(nextMode);
           }}
+          onGestureModeTo={(m) => setMirrorMode(m)}
           onGesturePanelToggle={() => setIsDrawerOpen(!isDrawerOpen)}
           isDrawerOpen={isDrawerOpen}
           servoAngle={state.servoAngle}

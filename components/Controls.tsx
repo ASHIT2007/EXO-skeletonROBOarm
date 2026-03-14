@@ -4,22 +4,19 @@ import { Power, RefreshCw, Eye, Box, Zap, Link, Usb, Settings } from 'lucide-rea
 
 interface ControlsProps {
   power: boolean;
-  servoAngle: number;
   joints: JointState;
   gestureMode: GestureMode;
   safetyThreshold: number;
   pressure: number;
   heat: number;
   vibration: number;
-  manualHeat?: number;
-  manualVibration?: number;
-  manualPermissive?: boolean;
   status: SystemStatus;
   viewMode: ViewMode;
   isTactileMode: boolean;
   isSerialConnected: boolean;
   isTracking: boolean;
   isDrawerOpen: boolean;
+  servoAngle: number;
   onPowerToggle: () => void;
   onJointChange: (joint: keyof JointState, val: number) => void;
   onAngleChange: (val: number) => void;
@@ -31,7 +28,8 @@ interface ControlsProps {
   onViewModeToggle: () => void;
   onTactileModeToggle: () => void;
   onConnect: () => void;
-  onGestureModeToggle: () => void;
+  onGestureModeToggle?: () => void;
+  onGestureModeTo?: (mode: GestureMode) => void;
   onGesturePanelToggle: () => void;
 }
 
@@ -39,27 +37,38 @@ export const Controls: React.FC<ControlsProps> = ({
   power,
   joints,
   gestureMode,
+  safetyThreshold,
   status,
   viewMode,
   isTactileMode,
   isSerialConnected,
+  isTracking,
+  isDrawerOpen,
   onPowerToggle,
+  onJointChange,
+  onThresholdChange,
   onReboot,
   onViewModeToggle,
   onTactileModeToggle,
   onConnect,
   onGestureModeToggle,
+  onGestureModeTo,
   onGesturePanelToggle,
-  isTracking,
-  onJointChange,
-  safetyThreshold,
-  onThresholdChange,
-  isDrawerOpen,
-  servoAngle
 }) => {
   const isCritical = status === SystemStatus.CRITICAL || status === SystemStatus.GESTURE_LOSS;
   const isRebooting = status === SystemStatus.REBOOTING;
+  
+  // USER REQUIREMENT: Keep manual controls active if no video detected/tracking lost
+  // We only block interaction if tracking is healthy AND Live mode is active (mirroring is taking over)
   const isGestureMirroring = gestureMode === 'LIVE' && isTracking;
+
+  const handleModeClick = (m: GestureMode) => {
+    if (onGestureModeTo) {
+      onGestureModeTo(m);
+    } else if (onGestureModeToggle) {
+      onGestureModeToggle();
+    }
+  };
 
   return (
     <div className="w-full bg-black/90 border-t border-cyan-500/20 backdrop-blur-xl p-4 flex items-center justify-between shadow-[0_-10px_30px_rgba(0,0,0,0.8)]">
@@ -89,7 +98,7 @@ export const Controls: React.FC<ControlsProps> = ({
             {['DISABLED', 'SHADOW', 'LIVE'].map((m) => (
               <button
                 key={m}
-                onClick={onGestureModeToggle}
+                onClick={() => handleModeClick(m as GestureMode)}
                 className={`px-3 py-1 text-[8px] font-black uppercase transition-all duration-300 rounded-sm ${
                   gestureMode === m 
                   ? (m === 'LIVE' ? 'bg-red-500 text-white' : 'bg-cyan-500 text-black')
@@ -103,13 +112,20 @@ export const Controls: React.FC<ControlsProps> = ({
         </div>
       </div>
 
-      <div className={`flex-grow flex gap-4 px-8 overflow-hidden transition-all duration-300 relative ${isGestureMirroring || isCritical ? 'opacity-30 grayscale-[0.8] pointer-events-none' : ''}`}>
-        {(isGestureMirroring || isCritical) && (
+      <div className={`flex-grow flex gap-4 px-8 overflow-hidden transition-all duration-300 relative ${isCritical ? 'opacity-30 grayscale-[0.8] pointer-events-none' : ''}`}>
+        {isCritical && (
           <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/40 backdrop-blur-[2px] rounded">
-            <span className={`px-4 py-1 rounded text-[10px] font-black tracking-widest animate-pulse ${isCritical ? 'bg-red-600 text-white' : 'bg-cyan-500 text-black'}`}>
-              {isCritical ? 'SYSTEM_LOCKED_ALARM' : 'GESTURE_CONTROL_ACTIVE'}
+            <span className="px-4 py-1 rounded text-[10px] font-black tracking-widest animate-pulse bg-red-600 text-white">
+              SYSTEM_LOCKED_ALARM
             </span>
           </div>
+        )}
+        
+        {/* If gesture mirroring is active, we show a subtle indicator but don't block manual sliders unless tracking is healthy */}
+        {isGestureMirroring && (
+           <div className="absolute top-0 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+             <span className="bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 px-2 py-0.5 rounded text-[7px] font-black tracking-tighter">GESTURE_CTRL_OVERRIDE</span>
+           </div>
         )}
         
         <div className="flex gap-6 items-center">

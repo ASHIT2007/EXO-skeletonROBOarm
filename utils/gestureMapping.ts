@@ -79,8 +79,7 @@ export function mapLandmarksTo4DOF(landmarks: any[]): JointState {
   const pinkyCurl = getCurl([17, 18, 19, 20]);
 
   // J1_BASE: Wrist X position drives base rotation.
-  // In a mirrored view, we want the arm to follow the hand.
-  // We apply a small deadband to prevent jitter at center
+  // Reference repo uses: (wristX - 0.1) / 0.8 * 180
   const wristX = landmarks[0].x;
   let j1 = (wristX - 0.1) / 0.8 * 180; // Scale 0.1-0.9 to 0-180
   
@@ -93,7 +92,7 @@ export function mapLandmarksTo4DOF(landmarks: any[]): JointState {
   const avgRingPinky = (ringCurl + pinkyCurl) / 2;
   let j3 = 180 - (Math.pow(avgRingPinky / 180, 1.2) * 180);
 
-  // J4_GRIPPER: Fist detection
+  // J4_GRIPPER: Fist detection (matching reference repo)
   let j4 = detectFist(landmarks);
 
   // Clamping all to 0-180

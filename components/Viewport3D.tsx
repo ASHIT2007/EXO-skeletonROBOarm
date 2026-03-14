@@ -259,7 +259,7 @@ const SceneObjects: React.FC<Viewport3DProps> = (props) => {
     <>
       <Grid infiniteGrid fadeDistance={40} sectionColor={gridColor} cellColor={gridColor} sectionThickness={1.5} />
       <Robot mode={viewMode} joints={joints} isCritical={props.status === SystemStatus.CRITICAL} hasPower={props.power} isTactileMode={props.isTactileMode} />
-      {(gestureMode === 'SHADOW' || gestureMode === 'LIVE') && ghostJoints && (
+      {gestureMode === 'SHADOW' && ghostJoints && (
         <Robot mode={viewMode} joints={ghostJoints} isCritical={false} hasPower={true} isTactileMode={false} opacity={0.3} />
       )}
       {props.power && <SafetyZoneIndictor threshold={props.threshold} power={props.power} />}

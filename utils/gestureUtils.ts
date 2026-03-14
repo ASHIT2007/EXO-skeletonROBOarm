@@ -43,7 +43,7 @@ export const smoothValue = (current: number, target: number, alpha: number): num
  */
 export const mapLandmarksToJoints = (landmarks: any[]): JointState => {
   if (!landmarks || landmarks.length < 21) {
-    return { j1: 0, j2: 0, j3: 0, j4: 0, j5: 0, j6: 0 };
+    return { j1: 0, j2: 0, j3: 0, j4: 0 };
   }
 
   // Wrist (0)
@@ -87,7 +87,38 @@ export const mapLandmarksToJoints = (landmarks: any[]): JointState => {
   // Normalize distance (assuming 0.05 - 0.2 range)
   const j6 = Math.min(180, Math.max(0, (1 - (pinchDist - 0.05) / 0.15) * 180));
 
-  return { j1, j2, j3, j4, j5, j6 };
+  return { j1, j2, j3, j4 };
+};
+
+/**
+ * Moving Average Filter
+ */
+const MA_BUFFERS: Record<string, number[][]> = {};
+const WINDOW_SIZE = 5;
+
+export const applyMovingAverage = (joints: JointState, id: string = 'default'): JointState => {
+  if (!MA_BUFFERS[id]) {
+    MA_BUFFERS[id] = [
+      Array(WINDOW_SIZE).fill(joints.j1 || 90),
+      Array(WINDOW_SIZE).fill(joints.j2 || 90),
+      Array(WINDOW_SIZE).fill(joints.j3 || 90),
+      Array(WINDOW_SIZE).fill(joints.j4 || 0)
+    ];
+  }
+
+  const keys: (keyof JointState)[] = ['j1', 'j2', 'j3', 'j4'];
+  const result: any = {};
+
+  keys.forEach((key, i) => {
+    MA_BUFFERS[id][i].push(joints[key] || 0);
+    if (MA_BUFFERS[id][i].length > WINDOW_SIZE) {
+      MA_BUFFERS[id][i].shift();
+    }
+    const sum = MA_BUFFERS[id][i].reduce((a, b) => a + b, 0);
+    result[key] = sum / MA_BUFFERS[id][i].length;
+  });
+
+  return result as JointState;
 };
 
 /**
@@ -98,12 +129,12 @@ export const smoothJointState = (
   target: JointState,
   alpha: number
 ): JointState => {
+  const filteredTarget = applyMovingAverage(target);
+  
   return {
-    j1: smoothValue(current.j1, target.j1, alpha),
-    j2: smoothValue(current.j2, target.j2, alpha),
-    j3: smoothValue(current.j3, target.j3, alpha),
-    j4: smoothValue(current.j4, target.j4, alpha),
-    j5: smoothValue(current.j5, target.j5, alpha),
-    j6: smoothValue(current.j6, target.j6, alpha),
+    j1: smoothValue(current.j1, filteredTarget.j1, alpha),
+    j2: smoothValue(current.j2, filteredTarget.j2, alpha),
+    j3: smoothValue(current.j3, filteredTarget.j3, alpha),
+    j4: smoothValue(current.j4, filteredTarget.j4, alpha),
   };
 };

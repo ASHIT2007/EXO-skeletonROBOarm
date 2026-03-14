@@ -4,7 +4,7 @@ import { Camera } from '@mediapipe/camera_utils';
 import { JointState, GestureMode } from '../types';
 import { mapLandmarksTo4DOF, applyExponentialSmoothing } from '../utils/gestureMapping';
 
-export function useGestureMirror(externalState?: JointState) {
+export function useGestureMirror(externalState?: JointState, smoothingAlpha: number = 0.2) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const handsRef = useRef<Hands | null>(null);
@@ -55,7 +55,6 @@ export function useGestureMirror(externalState?: JointState) {
       const rawJoints = mapLandmarksTo4DOF(landmarks);
       
       // 3. Gripper Smoothing (0.2s delay logic)
-      // If raw j4 (fist) is different from last stable state, wait 200ms before switching
       if (rawJoints.j4 !== lastGripperStateRef.current) {
         if (!gripperTimerRef.current) {
           gripperTimerRef.current = Date.now();
@@ -69,8 +68,8 @@ export function useGestureMirror(externalState?: JointState) {
       
       const stabilizedJoints = { ...rawJoints, j4: lastGripperStateRef.current };
 
-      // 4. Apply Smoothing (alpha 0.2)
-      const smoothed = applyExponentialSmoothing(stabilizedJoints, smoothedRef.current, 0.2);
+      // 4. Apply Smoothing (using dynamic alpha)
+      const smoothed = applyExponentialSmoothing(stabilizedJoints, smoothedRef.current, smoothingAlpha);
       smoothedRef.current = smoothed;
       setJointAngles(smoothed);
 
@@ -81,12 +80,13 @@ export function useGestureMirror(externalState?: JointState) {
       setConfidence(0);
       drawNoHand(canvasCtx);
     }
-  }, []);
+  }, [smoothingAlpha]);
 
   useEffect(() => {
     let active = true;
 
     async function init() {
+      console.log("🛠️ Initializing Hands API (Main Thread)...");
       const hands = new Hands({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
       });
@@ -112,8 +112,9 @@ export function useGestureMirror(externalState?: JointState) {
           height: 480,
         });
         cameraRef.current = camera;
-        
-        if (mode !== 'DISABLED') {
+
+        if ((mode as string) !== 'DISABLED') {
+          console.log("🎥 Starting Camera...");
           camera.start();
         }
       }
@@ -122,10 +123,12 @@ export function useGestureMirror(externalState?: JointState) {
     init();
 
     return () => {
+      console.log("♻️ Cleaning up Gesture Logic...");
       active = false;
       cameraRef.current?.stop();
+      handsRef.current?.close();
     };
-  }, [onResults, mode === 'DISABLED']);
+  }, [onResults, (mode as string) === 'DISABLED']);
 
   const drawSkeleton = (ctx: CanvasRenderingContext2D, landmarks: any[]) => {
     const { width, height } = canvasRef.current!;
