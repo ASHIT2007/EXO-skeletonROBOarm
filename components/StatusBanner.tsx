@@ -11,6 +11,8 @@ interface StatusBannerProps {
     vibration?: number;
     pressure?: number;
     manualPermissive?: boolean;
+    isWarning?: boolean;
+    isClutchActive?: boolean;
 }
 
 export const StatusBanner: React.FC<StatusBannerProps> = ({ 
@@ -21,7 +23,9 @@ export const StatusBanner: React.FC<StatusBannerProps> = ({
     heat = 0, 
     vibration = 0, 
     pressure = 0,
-    manualPermissive = false
+    manualPermissive = false,
+    isWarning = false,
+    isClutchActive = false
 }) => {
     const isCritical = status === SystemStatus.CRITICAL;
     const isNominal = status === SystemStatus.NOMINAL;
@@ -50,15 +54,15 @@ export const StatusBanner: React.FC<StatusBannerProps> = ({
 
             {/* Center: Persistent Status & 3-State Strip */}
             <div className="flex flex-col items-center flex-grow max-w-2xl px-8">
-                <div className={`text-sm font-bold tracking-[0.3em] uppercase transition-colors mb-2 ${isCritical ? 'text-red-500' : 'text-cyan-400'}`}>
-                    System Status: {status}
+                <div className={`text-sm font-bold tracking-[0.3em] uppercase transition-colors mb-2 ${isCritical ? 'text-red-500' : (isClutchActive ? 'text-orange-400' : (isWarning ? 'text-yellow-500 animate-pulse' : 'text-cyan-400'))}`}>
+                    System Status: {isClutchActive ? 'TELEMETRY_CLUTCH: PAUSED' : (isWarning && !isCritical ? 'WARNING: LIMIT NEAR' : status)}
                 </div>
                 
                 {/* 3-State Indicator Strip */}
                 <div className="flex items-center w-full gap-1 h-2 relative">
-                    <div className={`flex-1 flex items-center justify-center gap-2 border-t-2 transition-all duration-300 ${sensorsSafe ? 'border-green-500 text-green-400' : 'border-red-600 text-red-600 opacity-50'}`}>
+                    <div className={`flex-1 flex items-center justify-center gap-2 border-t-2 transition-all duration-300 ${isCritical ? 'border-red-600 text-red-600' : (isWarning ? 'border-yellow-500 text-yellow-500' : (sensorsSafe ? 'border-green-500 text-green-400' : 'border-red-600 text-red-600 opacity-50'))}`}>
                          <Shield size={10} />
-                         <span className="text-[8px] font-black uppercase tracking-widest">Sensors Safe</span>
+                         <span className="text-[8px] font-black uppercase tracking-widest">{isWarning && !isCritical ? 'Limit Warning' : (sensorsSafe ? 'Sensors Safe' : 'Sensor Fault')}</span>
                     </div>
                     <div className="w-4 flex items-center justify-center text-gray-700">
                         <Activity size={10} />

@@ -22,6 +22,8 @@ interface Viewport3DProps {
   threshold: number;
   isTactileMode: boolean;
   gestureMode: GestureMode;
+  lastInputTime?: number;
+  orbitAzimuth?: number;
 }
 
 const COLOR_BODY_REAL = "#222222"; // Industrial Dark Gray
@@ -66,10 +68,13 @@ const Robot: React.FC<{
   const isWireframe = mode === 'wireframe';
 
   // Mapping
-  const j1Rot = THREE.MathUtils.degToRad(joints.j1 - 90);
-  const j2Rot = THREE.MathUtils.degToRad(joints.j2 - 90);
-  const j3Rot = THREE.MathUtils.degToRad(joints.j3 - 90);
-  const j4Pinch = joints.j4 / 180;
+  // Mapping - Strict Rotational Axes (Degrees to Radians)
+  const degToRad = (deg: number) => (deg * Math.PI) / 180;
+  
+  const j1Rot = degToRad((joints.j1 ?? 90) - 90);
+  const j2Rot = degToRad((joints.j2 ?? 90) - 90);
+  const j3Rot = degToRad((joints.j3 ?? 90) - 90);
+  const j4Pinch = (joints.j4 ?? 0) / 180;
 
   const holoMain = isCritical ? COLOR_HOLO_RED : (hasPower ? COLOR_HOLO_CYAN : COLOR_HOLO_DIM);
 
@@ -110,7 +115,7 @@ const Robot: React.FC<{
         )}
       </group>
 
-      {/* ROTATING BASE PEDESTAL */}
+      {/* ROTATING BASE PEDESTAL - [STATIC_POS, DYNAMIC_ROT] */}
       <group position={[0, 1.2, 0]} rotation={[0, -j1Rot, 0]}>
         {isWireframe ? (
           <Cylinder args={[1.5, 1.8, 1, 16]}>
@@ -122,7 +127,7 @@ const Robot: React.FC<{
           </Cylinder>
         )}
 
-        {/* SHOULDER ASSEMBLY */}
+        {/* SHOULDER ASSEMBLY - [STATIC_POS, DYNAMIC_ROT] */}
         <group position={[0, 1, 0]} rotation={[j2Rot, 0, 0]}>
           {/* Main Joint Hub */}
           <group rotation={[0, 0, Math.PI / 2]}>
@@ -161,7 +166,7 @@ const Robot: React.FC<{
               </group>
             )}
 
-            {/* J3: ELBOW */}
+            {/* J3: ELBOW - [STATIC_POS, DYNAMIC_ROT] */}
             <group position={[0, 1.6, 0]} rotation={[j3Rot, 0, 0]}>
               <group rotation={[0, 0, Math.PI / 2]}>
                 <Cylinder args={[0.5, 0.5, 1.4, 16]}>
@@ -218,42 +223,13 @@ const Robot: React.FC<{
   );
 };
 
-// 3D Boundary Indicator for Safety Threshold
-const SafetyZoneIndictor: React.FC<{ threshold: number; power: boolean }> = ({ threshold, power }) => {
-  const radius = (threshold / 180) * 8; // Scale for visual fit
-  
-  return (
-    <group position={[0, -0.1, 0]}>
-      {/* Outer Boundary Ring */}
-      <mesh rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[radius, 0.03, 16, 100]} />
-        <meshBasicMaterial color={power ? "#ff003c" : "#333"} opacity={0.4} transparent />
-      </mesh>
-      
-      {/* Semi-transparent Danger Shell */}
-      <mesh>
-        <sphereGeometry args={[radius, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2]} />
-        <meshBasicMaterial 
-          color="#ff003c" 
-          opacity={0.05} 
-          transparent 
-          wireframe
-        />
-      </mesh>
 
-      {/* Origin Point Indicator */}
-      <mesh position={[0, 0, 0]}>
-        <sphereGeometry args={[0.2, 16, 16]} />
-        <meshBasicMaterial color="#ff003c" opacity={0.5} transparent />
-      </mesh>
-    </group>
-  );
-};
 
 const SceneObjects: React.FC<Viewport3DProps> = (props) => {
   const { viewMode, joints, ghostJoints, gestureMode } = props;
   const isWireframe = viewMode === 'wireframe';
   const gridColor = isWireframe ? "#004455" : "#222";
+  const orbitRef = useRef<any>(null);
 
   return (
     <>
@@ -262,7 +238,7 @@ const SceneObjects: React.FC<Viewport3DProps> = (props) => {
       {gestureMode === 'SHADOW' && ghostJoints && (
         <Robot mode={viewMode} joints={ghostJoints} isCritical={false} hasPower={true} isTactileMode={false} opacity={0.3} />
       )}
-      {props.power && <SafetyZoneIndictor threshold={props.threshold} power={props.power} />}
+      <OrbitControls ref={orbitRef} enablePan={false} minPolarAngle={0} maxPolarAngle={Math.PI / 2} minDistance={5} maxDistance={60} />
     </>
   );
 };
@@ -281,7 +257,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = (props) => {
         <spotLight position={[5, 20, 5]} angle={0.4} penumbra={1} intensity={10} castShadow />
         {!isWireframe && <DreiEnvironment preset="studio" />}
         <SceneObjects {...props} />
-        <OrbitControls enablePan={false} minPolarAngle={0} maxPolarAngle={Math.PI / 2} minDistance={5} maxDistance={60} />
       </Canvas>
 
       <div className="absolute top-4 left-4 pointer-events-none">

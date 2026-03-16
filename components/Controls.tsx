@@ -129,25 +129,35 @@ export const Controls: React.FC<ControlsProps> = ({
         )}
         
         <div className="flex gap-6 items-center">
-          {(Object.entries(joints) as [keyof JointState, number][]).map(([key, val]) => (
-            <div key={key} className="flex flex-col items-center group">
-              <span className="text-[8px] font-black text-white/30 uppercase tracking-[0.2em] mb-1 group-hover:text-cyan-500 transition-colors">{key}</span>
-              <div className="relative flex items-center gap-2 bg-white/5 px-2 py-1 rounded border border-white/5 hover:border-cyan-500/30 transition-all">
-                <input 
-                  type="range"
-                  min="0"
-                  max="180"
-                  value={val}
-                  disabled={!power || isCritical}
-                  onChange={(e) => onJointChange(key, parseInt(e.target.value))}
-                  className="w-16 h-1 bg-cyan-900/50 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                />
-                <span className={`text-[10px] font-mono font-bold w-6 text-right ${val > safetyThreshold ? 'text-red-500' : 'text-cyan-400'}`}>
-                  {Math.round(val)}°
+          {(['j1', 'j2', 'j3', 'j4'] as const).map((key) => {
+            const val = joints[key];
+            const isManualActive = gestureMode !== 'LIVE' || !isTracking;
+            
+            return (
+              <div key={key} className={`flex flex-col items-center group transition-all duration-500 ${!isManualActive ? 'opacity-30 grayscale pointer-events-none' : 'opacity-100'}`}>
+                <span className={`text-[8px] font-black uppercase tracking-[0.2em] mb-1 transition-colors ${!isManualActive ? 'text-white/20' : 'text-cyan-500/70 group-hover:text-cyan-400'}`}>
+                  {key}
                 </span>
+                <div className={`relative flex items-center gap-2 bg-white/5 px-2 py-1 rounded border transition-all ${!isManualActive ? 'border-white/5' : 'border-cyan-500/20 hover:border-cyan-500/50 shadow-[0_0_15px_rgba(0,240,255,0.05)]'}`}>
+                  <input 
+                    type="range"
+                    min="0"
+                    max="180"
+                    value={val}
+                    disabled={!power || isCritical || !isManualActive}
+                    onChange={(e) => onJointChange(key, parseInt(e.target.value))}
+                    className="w-16 h-1 bg-cyan-900/50 rounded-lg appearance-none cursor-pointer accent-cyan-500 disabled:accent-gray-700"
+                  />
+                  <span className={`text-[10px] font-mono font-bold w-7 text-right ${val > safetyThreshold ? 'text-red-500' : (isManualActive ? 'text-cyan-400' : 'text-cyan-900')}`}>
+                    {Math.round(val)}°
+                  </span>
+                </div>
+                {!isManualActive && (
+                  <div className="absolute -bottom-4 text-[6px] font-bold text-cyan-500/40 tracking-tighter">AI_LINKED</div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

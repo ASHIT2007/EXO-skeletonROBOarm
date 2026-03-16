@@ -1,6 +1,64 @@
 import { JointState } from '../types';
 
 /**
+ * Validates if a JointState object contains any NaN or invalid numbers.
+ */
+export function isValidJointState(state: JointState): boolean {
+  const isInvalid = (n: any) => typeof n !== 'number' || isNaN(n) || !isFinite(n);
+  
+  if (isInvalid(state.j1) || isInvalid(state.j2) || isInvalid(state.j3) || isInvalid(state.j4) || isInvalid(state.wristTilt)) {
+    return false;
+  }
+  
+  for (const finger of state.fingerAngles) {
+    for (const angle of finger) {
+      if (isInvalid(angle)) return false;
+    }
+  }
+  
+  return true;
+}
+
+/**
+ * Sanitizes a single landmark point for NaN/Infinity.
+ */
+export function sanitizeLandmark(point: any): any | null {
+  if (!point || 
+      isNaN(point.x) || !isFinite(point.x) ||
+      isNaN(point.y) || !isFinite(point.y) ||
+      isNaN(point.z) || !isFinite(point.z)) {
+    return null;
+  }
+  return point;
+}
+
+/**
+ * Applies EMA to a landmark point.
+ */
+export function applyLandmarkEMA(curr: any, prev: any, alpha: number = 0.12): any {
+  if (!prev) return curr;
+  return {
+    x: prev.x + alpha * (curr.x - prev.x),
+    y: prev.y + alpha * (curr.y - prev.y),
+    z: prev.z + alpha * (curr.z - prev.z)
+  };
+}
+
+/**
+ * Ensures landmarks are valid before processing.
+ */
+function sanitizeLandmarks(landmarks: any[]): any[] | null {
+  if (!landmarks || landmarks.length < 21) return null;
+  const sanitized: any[] = [];
+  for (const lm of landmarks) {
+    const s = sanitizeLandmark(lm);
+    if (!s) return null;
+    sanitized.push(s);
+  }
+  return sanitized;
+}
+
+/**
  * Calculates the angle (in degrees) between three points.
  * PIP is the vertex.
  */
@@ -42,7 +100,7 @@ export function calculateDistance(p1: any, p2: any): number {
  * Detects if the hand is in a fist state.
  * Returns 1 for closed (fist), 0 for open.
  */
-export function detectFist(landmarks: any[]): number {
+export function detectFist(landmarks: any[]): boolean {
   // Fist Detection: Check if all primary fingertips are close to their respective MCP joints
   const indices = [8, 12, 16, 20];
   const mcpIndices = [5, 9, 13, 17];
@@ -54,66 +112,111 @@ export function detectFist(landmarks: any[]): number {
   
   const avgDist = totalDist / indices.length;
   // If avg distance between fingertip and its MCP is very small, it's a fist
-  // 0.1 - 0.15 is typical for a closed fist
-  return avgDist < 0.12 ? 180 : 0;
+  // 0.08 - 0.12 is typical for a closed fist
+  return avgDist < 0.1;
 }
 
 /**
- * Maps MediaPipe landmarks to the 4-DOF joint configuration.
+ * Detects if the hand is in an open palm state facing the camera.
  */
-export function mapLandmarksTo4DOF(landmarks: any[]): JointState {
-  if (!landmarks || landmarks.length < 21) return { j1: 90, j2: 90, j3: 90, j4: 0 };
-
-  // Helper to get finger curl
-  const getCurl = (indices: number[]) => calculateFingerCurl(
-    landmarks[indices[0]],
-    landmarks[indices[1]],
-    landmarks[indices[2]],
-    landmarks[indices[3]]
-  );
-
-  // const thumbCurl = getCurl([1, 2, 3, 4]); // Not used for mapping but available
-  const indexCurl = getCurl([5, 6, 7, 8]);
-  const middleCurl = getCurl([9, 10, 11, 12]);
-  const ringCurl = getCurl([13, 14, 15, 16]);
-  const pinkyCurl = getCurl([17, 18, 19, 20]);
-
-  // J1_BASE: Wrist X position drives base rotation.
-  // Reference repo uses: (wristX - 0.1) / 0.8 * 180
-  const wristX = landmarks[0].x;
-  let j1 = (wristX - 0.1) / 0.8 * 180; // Scale 0.1-0.9 to 0-180
+export function detectPalmOpen(landmarks: any[]): boolean {
+  // Check if all primary fingertips are far from their respective MCP joints
+  const indices = [8, 12, 16, 20];
+  const mcpIndices = [5, 9, 13, 17];
   
-  // J2_SHOULDER: Avg curl of index & middle. 
-  // We use a non-linear mapping for more expressive movement
-  const avgIndexMiddle = (indexCurl + middleCurl) / 2;
-  let j2 = 180 - (Math.pow(avgIndexMiddle / 180, 1.2) * 180);
+  let totalDist = 0;
+  indices.forEach((idx, i) => {
+    totalDist += calculateDistance(landmarks[idx], landmarks[mcpIndices[i]]);
+  });
+  
+  const avgDist = totalDist / indices.length;
+  // If avg distance is large, it's an open palm
+  return avgDist > 0.25;
+}
 
-  // J3_ELBOW: Avg curl of ring & pinky.
-  const avgRingPinky = (ringCurl + pinkyCurl) / 2;
-  let j3 = 180 - (Math.pow(avgRingPinky / 180, 1.2) * 180);
+/**
+ * Maps Wrist coordinates and Index distance to Robot Joint States (Exo-Core v2.0 Steering).
+ * Wrist X (0-1) -> Shoulder J1 (0-180), Mirrored for intuitive steering.
+ * Wrist Y (0-1) -> Elbow J2/J3 (0-180), High = Up, Low = Down.
+ * Distance(Wrist, IndexTip) -> Gripper J4 (Curled = 180, Extended = 0).
+ */
+export function mapWristToRobo(landmarks: any[], prevLandmarks: any[] | null = null, prevJ4: number = 0): JointState {
+  const sanitized = sanitizeLandmarks(landmarks);
+  if (!sanitized) return { 
+    j1: 90, j2: 90, j3: 90, j4: prevJ4, 
+    fingerAngles: Array(5).fill([0, 0, 0]), 
+    wristTilt: 0 
+  };
+  landmarks = sanitized;
 
-  // J4_GRIPPER: Fist detection (matching reference repo)
-  let j4 = detectFist(landmarks);
+  // 1. Landmark smoothing (EMA)
+  if (prevLandmarks && prevLandmarks.length >= 21) {
+    landmarks = landmarks.map((lm, i) => applyLandmarkEMA(lm, prevLandmarks[i], 0.12));
+  }
 
-  // Clamping all to 0-180
-  const clamp = (v: number) => Math.min(180, Math.max(0, v));
+  const wrist = landmarks[0];
+  const indexTip = landmarks[8];
+
+  // 2. J1: Shoulder Rotate (Horizontal steering)
+  // MediaPipe X is 0 (left) to 1 (right). 
+  // For intuitive steering (mirrored): 1 - X
+  // Map range [0.2, 0.8] to [0, 180] degrees
+  const xNorm = Math.max(0, Math.min(1, (wrist.x - 0.2) / 0.6));
+  const j1 = (1 - xNorm) * 180;
+
+  // 3. J2/J3: Arm Elevation (Vertical steering)
+  // High hand (Y=0.2) -> 180 (Arm Up)
+  // Low hand (Y=0.8) -> 0 (Arm Down)
+  const yNorm = Math.max(0, Math.min(1, (wrist.y - 0.2) / 0.6));
+  const jReach = (1 - yNorm) * 180;
+  
+  // Distribute reach between J2 and J3 for natural movement
+  const j2 = jReach * 0.6; // Primary lift
+  const j3 = jReach * 0.4; // Secondary extension
+
+  // 4. J4: Gripper / Wrist Extension
+  // Distance between Wrist (0) and Index Tip (8)
+  const gripperDist = calculateDistance(wrist, indexTip);
+  // Extended (open) >= 0.25, Curled (closed) <= 0.12
+  const j4Raw = Math.max(0, Math.min(1, (0.25 - gripperDist) / 0.13)) * 180;
+
+  // 5. Fingers: Simple mapping based on J4 for visual consistency
+  const fAngle = (j4Raw / 180) * 90;
+  const fingerAngles = Array(5).fill([fAngle, fAngle * 0.75, fAngle * 0.5]);
 
   return {
-    j1: clamp(j1),
-    j2: clamp(j2),
-    j3: clamp(j3),
-    j4: clamp(j4)
+    j1: Math.min(180, Math.max(0, j1)),
+    j2: Math.min(180, Math.max(0, j2)),
+    j3: Math.min(180, Math.max(0, j3)),
+    j4: j4Raw,
+    fingerAngles,
+    wristTilt: 0
   };
 }
 
+// Legacy export for backward compatibility
+export { mapWristToRobo as mapLandmarksTo4DOF };
+
 /**
- * Exponential Smoothing helper.
+ * Exponential Smoothing helper for JointState.
  */
-export function applyExponentialSmoothing(raw: JointState, smoothed: JointState, alpha: number = 0.2): JointState {
+export function applyExponentialSmoothing(raw: JointState, smoothed: JointState, alpha: number = 0.25): JointState {
+  // If raw is invalid, return smoothed to prevent corruption
+  if (!isValidJointState(raw)) return smoothed;
+  
+  const smooth = (curr: number, target: number) => {
+    const val = curr + alpha * (target - curr);
+    return isNaN(val) ? curr : val;
+  };
+  
   return {
-    j1: smoothed.j1 + alpha * (raw.j1 - smoothed.j1),
-    j2: smoothed.j2 + alpha * (raw.j2 - smoothed.j2),
-    j3: smoothed.j3 + alpha * (raw.j3 - smoothed.j3),
-    j4: smoothed.j4 + alpha * (raw.j4 - smoothed.j4),
+    j1: smooth(smoothed.j1, raw.j1),
+    j2: smooth(smoothed.j2, raw.j2),
+    j3: smooth(smoothed.j3, raw.j3),
+    j4: smooth(smoothed.j4, raw.j4),
+    wristTilt: smooth(smoothed.wristTilt, raw.wristTilt),
+    fingerAngles: raw.fingerAngles.map((finger, i) => 
+      finger.map((angle, j) => smooth(smoothed.fingerAngles[i][j], angle))
+    )
   };
 }

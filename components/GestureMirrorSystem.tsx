@@ -4,9 +4,10 @@ interface GestureMirrorProps {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   isTracking: boolean;
+  bimanualStatus?: 'NONE' | 'SINGLE' | 'DUAL';
 }
 
-export const GestureMirrorSystem: React.FC<GestureMirrorProps> = ({ canvasRef, videoRef, isTracking }) => {
+export const GestureMirrorSystem: React.FC<GestureMirrorProps> = ({ canvasRef, videoRef, isTracking, bimanualStatus }) => {
   // Move feed back to the left side as requested
   const [position, setPosition] = useState({ x: 20, y: 120 });
   const [isDragging, setIsDragging] = useState(false);
@@ -104,7 +105,7 @@ export const GestureMirrorSystem: React.FC<GestureMirrorProps> = ({ canvasRef, v
           </div>
         )}
 
-        {/* Status Indicator */}
+        {/* Status Indicators */}
         <div className="absolute top-2 right-2 flex items-center gap-1.5 z-50">
           <div className={`w-2 h-2 rounded-full ${isTracking ? 'bg-green-500 shadow-[0_0_8px_#10b981] animate-pulse' : 'bg-red-500 shadow-[0_0_8px_#ef4444]'}`} />
         </div>

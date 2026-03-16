@@ -1,24 +1,29 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Hands, Results } from '@mediapipe/hands';
 import { Camera } from '@mediapipe/camera_utils';
-import { JointState, GestureMode } from '../types';
-import { mapLandmarksTo4DOF, applyExponentialSmoothing } from '../utils/gestureMapping';
+import { JointState, GestureMode, BimanualState, HandRole, BimanualStatus } from '../types';
+import { mapWristToRobo, applyExponentialSmoothing, detectFist, detectPalmOpen, isValidJointState } from '../utils/gestureMapping';
+import { BIMANUAL_CONFIG } from '../constants';
 
-export function useGestureMirror(externalState?: JointState, smoothingAlpha: number = 0.2) {
+export function useGestureMirror(externalState?: JointState, smoothingAlpha: number = 0.2, onEmergencyStop?: () => void, onEmergencyResume?: () => void) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const handsRef = useRef<Hands | null>(null);
   const cameraRef = useRef<Camera | null>(null);
-  const smoothedRef = useRef<JointState>({ j1: 90, j2: 90, j3: 90, j4: 0 });
-  const gripperTimerRef = useRef<number | null>(null);
+  const smoothedRef = useRef<JointState>({ j1: 90, j2: 90, j3: 90, j4: 0, fingerAngles: Array(5).fill(null).map(() => [0, 0, 0]), wristTilt: 0 });
   const lastGripperStateRef = useRef<number>(0);
+  const safetyCooldownRef = useRef<number>(0);
+  const lastLandmarksRef = useRef<any[] | null>(null);
+  const isClutchActiveRef = useRef<boolean>(false);
 
-  const [jointAngles, setJointAngles] = useState<JointState>({ j1: 90, j2: 90, j3: 90, j4: 0 });
+  const [jointAngles, setJointAngles] = useState<JointState>({ j1: 90, j2: 90, j3: 90, j4: 0, fingerAngles: Array(5).fill([0, 0, 0]), wristTilt: 0 });
   const [isTracking, setIsTracking] = useState(false);
   const [confidence, setConfidence] = useState(0);
   const [mode, setMode] = useState<GestureMode>('DISABLED');
 
-  // Jump prevention: When tracking starts, sync smoothed state to external
+  // State for tracking
+
+  // Jump prevention
   const hasSyncedRef = useRef(false);
   useEffect(() => {
     if (isTracking && !hasSyncedRef.current && externalState) {
@@ -39,42 +44,51 @@ export function useGestureMirror(externalState?: JointState, smoothingAlpha: num
     // 1. Draw Mirrored Camera Feed
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, width, height);
-    
-    // Mirroring horizontal context
     canvasCtx.translate(width, 0);
     canvasCtx.scale(-1, 1);
     canvasCtx.drawImage(results.image, 0, 0, width, height);
     canvasCtx.restore();
 
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-      const landmarks = results.multiHandLandmarks[0];
       setIsTracking(true);
       setConfidence(0.9);
 
-      // 2. Calculate Joints
-      const rawJoints = mapLandmarksTo4DOF(landmarks);
+      const mainHand = results.multiHandLandmarks[0];
       
-      // 3. Gripper Smoothing (0.2s delay logic)
-      if (rawJoints.j4 !== lastGripperStateRef.current) {
-        if (!gripperTimerRef.current) {
-          gripperTimerRef.current = Date.now();
-        } else if (Date.now() - gripperTimerRef.current > 200) {
-          lastGripperStateRef.current = rawJoints.j4;
-          gripperTimerRef.current = null;
+      // 2. Process Hand (Main Steering Control)
+      let currentJoints = { ...smoothedRef.current };
+      const rawJoints = mapWristToRobo(mainHand, lastLandmarksRef.current, lastGripperStateRef.current);
+      
+      // FRAME DISCARDING: Only proceed if tracking data is valid
+      if (isValidJointState(rawJoints)) {
+        lastLandmarksRef.current = mainHand;
+        lastGripperStateRef.current = rawJoints.j4;
+
+        if (!isClutchActiveRef.current) {
+          currentJoints = rawJoints;
         }
-      } else {
-        gripperTimerRef.current = null;
       }
-      
-      const stabilizedJoints = { ...rawJoints, j4: lastGripperStateRef.current };
 
-      // 4. Apply Smoothing (using dynamic alpha)
-      const smoothed = applyExponentialSmoothing(stabilizedJoints, smoothedRef.current, smoothingAlpha);
-      smoothedRef.current = smoothed;
-      setJointAngles(smoothed);
+      // 3. Safety Gestures
+      if (Date.now() - safetyCooldownRef.current > 1000) {
+        if (detectPalmOpen(mainHand)) {
+          onEmergencyStop?.();
+          safetyCooldownRef.current = Date.now();
+        } else if (detectFist(mainHand)) {
+          onEmergencyResume?.();
+          safetyCooldownRef.current = Date.now();
+        }
+      }
 
-      // 5. Draw Skeleton (Mirrored)
-      drawSkeleton(canvasCtx, landmarks);
+      drawSkeleton(canvasCtx, mainHand, 'RIGHT'); // Legacy 'RIGHT' label or omit
+
+      // 5. Smoothing & Set State
+      if (!isClutchActiveRef.current) {
+        const smoothed = applyExponentialSmoothing(currentJoints, smoothedRef.current, 0.25);
+        smoothedRef.current = smoothed;
+        setJointAngles(smoothed);
+      }
+
     } else {
       setIsTracking(false);
       setConfidence(0);
@@ -83,10 +97,19 @@ export function useGestureMirror(externalState?: JointState, smoothingAlpha: num
   }, [smoothingAlpha]);
 
   useEffect(() => {
-    let active = true;
+    const handleKeyDown = (e: KeyboardEvent) => { if (e.code === 'Space') isClutchActiveRef.current = true; };
+    const handleKeyUp = (e: KeyboardEvent) => { if (e.code === 'Space') isClutchActiveRef.current = false; };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
+  useEffect(() => {
+    let active = true;
     async function init() {
-      console.log("🛠️ Initializing Hands API (Main Thread)...");
       const hands = new Hands({
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
       });
@@ -94,8 +117,8 @@ export function useGestureMirror(externalState?: JointState, smoothingAlpha: num
       hands.setOptions({
         maxNumHands: 1,
         modelComplexity: 1,
-        minDetectionConfidence: 0.75,
-        minTrackingConfidence: 0.75,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.7,
       });
 
       hands.onResults(onResults);
@@ -112,50 +135,32 @@ export function useGestureMirror(externalState?: JointState, smoothingAlpha: num
           height: 480,
         });
         cameraRef.current = camera;
-
-        if ((mode as string) !== 'DISABLED') {
-          console.log("🎥 Starting Camera...");
-          camera.start();
-        }
+        if ((mode as string) !== 'DISABLED') camera.start();
       }
     }
-
     init();
-
     return () => {
-      console.log("♻️ Cleaning up Gesture Logic...");
       active = false;
       cameraRef.current?.stop();
       handsRef.current?.close();
     };
   }, [onResults, (mode as string) === 'DISABLED']);
 
-  const drawSkeleton = (ctx: CanvasRenderingContext2D, landmarks: any[]) => {
+  const drawSkeleton = (ctx: CanvasRenderingContext2D, landmarks: any[], role: HandRole) => {
     const { width, height } = canvasRef.current!;
-    
-    // We must draw landmarks mirrored as well
     const getMirroredX = (x: number) => width - (x * width);
 
-    const fingerColors = {
-      thumb: '#FFD700',
-      index: '#00FF88',
-      middle: '#00AAFF',
-      ring: '#FF8800',
-      pinky: '#FF4444',
-      base: '#FFFFFF'
-    };
-
+    const color = role === 'RIGHT' ? '#00f0ff' : '#ff00ff'; // Cyan for Right, Magenta for Left
+    
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    
     const connections = [
-      [0, 1], [1, 2], [2, 3], [3, 4], // thumb
-      [0, 5], [5, 6], [6, 7], [7, 8], // index
-      [0, 9], [9, 10], [10, 11], [11, 12], // middle
-      [0, 13], [13, 14], [14, 15], [15, 16], // ring
-      [0, 17], [17, 18], [18, 19], [19, 20], // pinky
-      [5, 9], [9, 13], [13, 17] // palm
+      [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
+      [0, 9], [9, 10], [10, 11], [11, 12], [0, 13], [13, 14], [14, 15], [15, 16],
+      [0, 17], [17, 18], [18, 19], [19, 20], [5, 9], [9, 13], [13, 17]
     ];
 
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.lineWidth = 1.5;
     connections.forEach(([i, j]) => {
       ctx.beginPath();
       ctx.moveTo(getMirroredX(landmarks[i].x), landmarks[i].y * height);
@@ -163,19 +168,10 @@ export function useGestureMirror(externalState?: JointState, smoothingAlpha: num
       ctx.stroke();
     });
 
-    landmarks.forEach((lm, i) => {
-      let color = fingerColors.base;
-      if (i >= 1 && i <= 4) color = fingerColors.thumb;
-      else if (i >= 5 && i <= 8) color = fingerColors.index;
-      else if (i >= 9 && i <= 12) color = fingerColors.middle;
-      else if (i >= 13 && i <= 16) color = fingerColors.ring;
-      else if (i >= 17 && i <= 20) color = fingerColors.pinky;
-
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(getMirroredX(lm.x), lm.y * height, 3, 0, 2 * Math.PI);
-      ctx.fill();
-    });
+    // Draw Wrist Label
+    ctx.fillStyle = color;
+    ctx.font = 'bold 10px monospace';
+    ctx.fillText(role === 'RIGHT' ? 'RIGHT' : 'LEFT', getMirroredX(landmarks[0].x) + 5, landmarks[0].y * height - 5);
   };
 
   const drawNoHand = (ctx: CanvasRenderingContext2D) => {
@@ -188,5 +184,5 @@ export function useGestureMirror(externalState?: JointState, smoothingAlpha: num
     ctx.fillText('NO HAND DETECTED', width / 2, height / 2);
   };
 
-  return { videoRef, canvasRef, jointAngles, isTracking, confidence, mode, setMode };
+  return { videoRef, canvasRef, jointAngles, isTracking, confidence, mode, setMode, isClutchActive: isClutchActiveRef.current };
 }

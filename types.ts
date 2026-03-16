@@ -5,14 +5,27 @@ export enum SystemStatus {
   GESTURE_LOSS = 'GESTURE LOSS'
 }
 
+export type HandRole = 'LEFT' | 'RIGHT';
+export type BimanualStatus = 'NONE' | 'SINGLE' | 'DUAL';
+
+export interface BimanualState {
+  status: BimanualStatus;
+  activeHands: HandRole[];
+  leftHandX: number;
+  leftHandY: number;
+  orbitAzimuth: number;
+}
+
 export type ViewMode = 'wireframe' | 'realistic';
 export type GestureMode = 'DISABLED' | 'SHADOW' | 'LIVE';
 
 export interface JointState {
-  j1: number; // Base
-  j2: number; // Shoulder
-  j3: number; // Elbow
-  j4: number; // Gripper
+  j1: number; // Base / Wrist Y Rotation
+  j2: number; // Shoulder / Wrist X Tilt
+  j3: number; // Elbow / Wrist Z Tilt
+  j4: number; // Gripper / Fist
+  fingerAngles: number[][]; // [fingerIndex][segmentIndex] (5x3)
+  wristTilt: number;
 }
 
 export interface CalibrationProfile {
@@ -45,4 +58,5 @@ export interface SystemState {
   isCalibrated: boolean;
   gestureSmoothing: number;
   isGestureFrozen: boolean;
+  isWarning: boolean;
 }

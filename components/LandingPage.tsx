@@ -59,17 +59,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
             <div className="w-full space-y-4">
                 <div className="text-center mb-6">
                     <h3 className="text-4xl font-black uppercase tracking-[0.2em] text-green-500 drop-shadow-[0_0_10px_rgba(0,255,0,0.6)]">
-                        Team Roster
+                        TEAM DETAILS
                     </h3>
                     <div className="text-green-700 font-bold tracking-[0.5em] text-xs mt-2 uppercase">GROUP 03 BATCH 2</div>
                 </div>
 
                 <div className="flex flex-col gap-3">
                     {[
-                        { id: 'A472', name: 'TIWARY ASHIT' },
-                        { id: 'A480', name: 'KAMATH UNNATTI' },
-                        { id: 'A463', name: 'PYATI SHASHANK' },
-                        { id: 'A484', name: 'PAVAGADHI HRUTV' }
+                        { id: 'A472', name: ' ASHIT TIWARY' },
+                        { id: 'A463', name: ' SHASHANK PYATI' },
+                        { id: 'A480', name: ' UNNATTI KAMATH' },
+                        { id: 'A484', name: ' HRUTV PAVAGADHI' }
                     ].map((member, index) => (
                         <div 
                             key={member.id} 
