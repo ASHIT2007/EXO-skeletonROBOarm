@@ -97,11 +97,61 @@ export function calculateDistance(p1: any, p2: any): number {
 }
 
 /**
+ * Detects if the hand is in a 'Peace Sign' state.
+ * Returns true if Index and Middle fingers are extended, while others are curled.
+ */
+export function detectPeaceSign(landmarks: any[]): boolean {
+  if (!landmarks || landmarks.length < 21) return false;
+  
+  // Fingers to check for extension
+  const extendedIndices = [8, 12]; // Index, Middle
+  const curledIndices = [16, 20]; // Ring, Pinky
+  const mcpIndicesExtended = [5, 9];
+  const mcpIndicesCurled = [13, 17];
+
+  // Check extended
+  for (let i = 0; i < extendedIndices.length; i++) {
+    if (calculateDistance(landmarks[extendedIndices[i]], landmarks[mcpIndicesExtended[i]]) < 0.15) return false;
+  }
+  
+  // Check curled
+  for (let i = 0; i < curledIndices.length; i++) {
+    if (calculateDistance(landmarks[curledIndices[i]], landmarks[mcpIndicesCurled[i]]) > 0.12) return false;
+  }
+
+  // Thumb should also be somewhat tucked or at least not extended far
+  if (calculateDistance(landmarks[4], landmarks[5]) > 0.15) return false;
+
+  return true;
+}
+
+/**
+ * Detects if the hand is in a 'Thumbs Up' state.
+ */
+export function detectThumbsUp(landmarks: any[]): boolean {
+  if (!landmarks || landmarks.length < 21) return false;
+
+  // Thumb tip should be higher than thumb MCP
+  const thumbTip = landmarks[4];
+  const thumbMCP = landmarks[2];
+  if (thumbTip.y > thumbMCP.y - 0.05) return false;
+
+  // Other fingers should be curled into a fist
+  const indices = [8, 12, 16, 20];
+  const mcpIndices = [5, 9, 13, 17];
+  
+  let totalDist = 0;
+  indices.forEach((idx, i) => {
+    totalDist += calculateDistance(landmarks[idx], landmarks[mcpIndices[i]]);
+  });
+  
+  return (totalDist / indices.length) < 0.1;
+}
+
+/**
  * Detects if the hand is in a fist state.
- * Returns 1 for closed (fist), 0 for open.
  */
 export function detectFist(landmarks: any[]): boolean {
-  // Fist Detection: Check if all primary fingertips are close to their respective MCP joints
   const indices = [8, 12, 16, 20];
   const mcpIndices = [5, 9, 13, 17];
   
@@ -111,8 +161,6 @@ export function detectFist(landmarks: any[]): boolean {
   });
   
   const avgDist = totalDist / indices.length;
-  // If avg distance between fingertip and its MCP is very small, it's a fist
-  // 0.08 - 0.12 is typical for a closed fist
   return avgDist < 0.1;
 }
 
@@ -135,15 +183,16 @@ export function detectPalmOpen(landmarks: any[]): boolean {
 }
 
 /**
- * Maps Wrist coordinates and Index distance to Robot Joint States (Exo-Core v2.0 Steering).
- * Wrist X (0-1) -> Shoulder J1 (0-180), Mirrored for intuitive steering.
- * Wrist Y (0-1) -> Elbow J2/J3 (0-180), High = Up, Low = Down.
- * Distance(Wrist, IndexTip) -> Gripper J4 (Curled = 180, Extended = 0).
+ * Maps Wrist coordinates and Hand Depth to Robot Joint States (Exo-Core v3.0 Advanced).
+ * Wrist X (0-1) -> Shoulder J1 (0-180), INV MULTIPLIER for correct mirror matching.
+ * Wrist Y (0-1) -> Elevation J2 (0-180), High = Up.
+ * Wrist Z / Scale -> Reach J3 (0-180), Closer = Forward.
+ * Wrist distance to Index -> Gripper J4.
  */
 export function mapWristToRobo(landmarks: any[], prevLandmarks: any[] | null = null, prevJ4: number = 0): JointState {
   const sanitized = sanitizeLandmarks(landmarks);
   if (!sanitized) return { 
-    j1: 90, j2: 90, j3: 90, j4: prevJ4, 
+    j1: 90, j2: 135, j3: 45, j4: prevJ4, 
     fingerAngles: Array(5).fill([0, 0, 0]), 
     wristTilt: 0 
   };
@@ -151,36 +200,55 @@ export function mapWristToRobo(landmarks: any[], prevLandmarks: any[] | null = n
 
   // 1. Landmark smoothing (EMA)
   if (prevLandmarks && prevLandmarks.length >= 21) {
-    landmarks = landmarks.map((lm, i) => applyLandmarkEMA(lm, prevLandmarks[i], 0.12));
+    landmarks = landmarks.map((lm, i) => applyLandmarkEMA(lm, prevLandmarks[i], 0.15));
   }
 
   const wrist = landmarks[0];
+  const indexMCP = landmarks[5];
+  const pinkyMCP = landmarks[17];
   const indexTip = landmarks[8];
 
-  // 2. J1: Shoulder Rotate (Horizontal steering)
-  // MediaPipe X is 0 (left) to 1 (right). 
-  // For intuitive steering (mirrored): 1 - X
-  // Map range [0.2, 0.8] to [0, 180] degrees
+  // 2. Velocity Calculation for Dynamic Speed Scaling
+  let velocityFactor = 1.0;
+  if (prevLandmarks && prevLandmarks.length >= 21) {
+    const dist = calculateDistance(wrist, prevLandmarks[0]);
+    // Standardize: fast = >0.05 per frame, slow = <0.01
+    velocityFactor = Math.max(0.4, Math.min(1.5, dist * 20)); 
+  }
+
+  // 3. J1: Shoulder Rotate (The Mirror Fix)
+  // MediaPipe X is 0 (right) to 1 (left) in mirrored canvas. 
+  // Physical right hand move -> X decreases.
+  // We want J1 to increase for physical right movement.
+  // FIX: Use raw X instead of (1-X) to invert the mapping for the mirrored camera feed
   const xNorm = Math.max(0, Math.min(1, (wrist.x - 0.2) / 0.6));
-  const j1 = (1 - xNorm) * 180;
+  const j1 = xNorm * 180; // Removed the (1-xNorm) to fix mirroring
 
-  // 3. J2/J3: Arm Elevation (Vertical steering)
-  // High hand (Y=0.2) -> 180 (Arm Up)
-  // Low hand (Y=0.8) -> 0 (Arm Down)
+  // 4. J2: Elevation (Vertical)
   const yNorm = Math.max(0, Math.min(1, (wrist.y - 0.2) / 0.6));
-  const jReach = (1 - yNorm) * 180;
-  
-  // Distribute reach between J2 and J3 for natural movement
-  const j2 = jReach * 0.6; // Primary lift
-  const j3 = jReach * 0.4; // Secondary extension
+  const j2 = (1 - yNorm) * 180;
 
-  // 4. J4: Gripper / Wrist Extension
-  // Distance between Wrist (0) and Index Tip (8)
+  // 5. J3: Depth Perception (Z-Axis / Hand Scale)
+  // Distance between Index MCP and Pinky MCP as proxy for hand size/depth
+  const handScale = calculateDistance(indexMCP, pinkyMCP);
+  // Near (Large) ~0.2 -> 180, Far (Small) ~0.08 -> 0
+  const zNorm = Math.max(0, Math.min(1, (handScale - 0.08) / 0.12));
+  const j3 = zNorm * 180;
+
+  // 6. J4: Gripper
   const gripperDist = calculateDistance(wrist, indexTip);
-  // Extended (open) >= 0.25, Curled (closed) <= 0.12
-  const j4Raw = Math.max(0, Math.min(1, (0.25 - gripperDist) / 0.13)) * 180;
+  const j4Raw = Math.max(0, Math.min(1, (0.22 - gripperDist) / 0.12)) * 180;
 
-  // 5. Fingers: Simple mapping based on J4 for visual consistency
+  // 7. Wrist Orientation (Pitch & Roll)
+  // Pitch: Angle of middle finger relative to wrist
+  const middleMCP = landmarks[9];
+  const wristPitch = (0.5 - (middleMCP.y - wrist.y + 0.1)) * 180;
+  
+  // Roll: Angle between Index MCP and Pinky MCP on Y axis
+  const rollAngle = Math.atan2(pinkyMCP.y - indexMCP.y, pinkyMCP.x - indexMCP.x) * (180 / Math.PI);
+  const wristTilt = Math.max(-90, Math.min(90, rollAngle));
+
+  // 8. Fingers: Dynamic mapping
   const fAngle = (j4Raw / 180) * 90;
   const fingerAngles = Array(5).fill([fAngle, fAngle * 0.75, fAngle * 0.5]);
 
@@ -188,9 +256,9 @@ export function mapWristToRobo(landmarks: any[], prevLandmarks: any[] | null = n
     j1: Math.min(180, Math.max(0, j1)),
     j2: Math.min(180, Math.max(0, j2)),
     j3: Math.min(180, Math.max(0, j3)),
-    j4: j4Raw,
+    j4: Math.min(180, Math.max(0, j4Raw)),
     fingerAngles,
-    wristTilt: 0
+    wristTilt: wristTilt
   };
 }
 

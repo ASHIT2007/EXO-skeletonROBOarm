@@ -17,14 +17,14 @@ const App: React.FC = () => {
   const serialPortRef = useRef<any>(null);
   const writerRef = useRef<WritableStreamDefaultWriter<string> | null>(null);
   const latestJointsRef = useRef<JointState>({ 
-    j1: 0, j2: 90, j3: 90, j4: 0, 
+    j1: 90, j2: 135, j3: 45, j4: 0, 
     fingerAngles: Array(5).fill([0, 0, 0]), 
     wristTilt: 0 
   });
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const faultCounterRef = useRef<number>(0);
   const manualTargetJointsRef = useRef<JointState>({ 
-    j1: 0, j2: 90, j3: 90, j4: 0, 
+    j1: 90, j2: 135, j3: 45, j4: 0, 
     fingerAngles: Array(5).fill([0, 0, 0]), 
     wristTilt: 0 
   });
@@ -37,12 +37,12 @@ const App: React.FC = () => {
     power: true,
     servoAngle: 0,
     joints: { 
-      j1: 0, j2: 90, j3: 90, j4: 0, 
+      j1: 90, j2: 135, j3: 45, j4: 0, 
       fingerAngles: Array(5).fill([0, 0, 0]), 
       wristTilt: 0 
     },
     ghostJoints: { 
-      j1: 0, j2: 90, j3: 90, j4: 0, 
+      j1: 90, j2: 135, j3: 45, j4: 0, 
       fingerAngles: Array(5).fill([0, 0, 0]), 
       wristTilt: 0 
     },
@@ -124,28 +124,24 @@ const App: React.FC = () => {
           };
         }
         
-        // Calculate DIFFERENTIAL_ANGLE (Weighted average of main joints)
-        const differentialAngle = targetJoints.j1 * 0.4 + targetJoints.j2 * 0.3 + targetJoints.j3 * 0.3;
+        // 1. Global Joint Safety Check (Any Joint > Threshold)
+        const jointsArray = [targetJoints.j1, targetJoints.j2, targetJoints.j3, targetJoints.j4];
+        const anyExceeds = jointsArray.some(val => val > prev.safetyThreshold);
         
-        // 1. Expand Boundary Limits: 15% increase is represented by scaling the threshold check
-        const adjustedThreshold = prev.safetyThreshold * 1.15;
-        const isUnsafe = differentialAngle > adjustedThreshold;
-
         // 2. Implement a Fault Buffer: 15 consecutive frames
         let nextStatus = prev.status;
         let nextPower = prev.power;
         let nextIsFrozen = prev.isGestureFrozen;
-        let nextIsWarning = differentialAngle > (adjustedThreshold - 5);
+        let nextIsWarning = jointsArray.some(val => val > (prev.safetyThreshold - 5));
 
-        if (isUnsafe) {
+        if (anyExceeds) {
           faultCounterRef.current += 1;
-          if (faultCounterRef.current >= 15) {
+          if (faultCounterRef.current >= 12) { // Slightly faster trip for safety
             nextStatus = SystemStatus.CRITICAL;
             nextPower = false;
             nextIsFrozen = true;
           }
         } else {
-          // Reset on any GOOD frame
           faultCounterRef.current = 0;
         }
 

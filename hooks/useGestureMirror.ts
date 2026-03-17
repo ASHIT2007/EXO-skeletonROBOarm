@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { Hands, Results } from '@mediapipe/hands';
 import { Camera } from '@mediapipe/camera_utils';
 import { JointState, GestureMode, BimanualState, HandRole, BimanualStatus } from '../types';
-import { mapWristToRobo, applyExponentialSmoothing, detectFist, detectPalmOpen, isValidJointState } from '../utils/gestureMapping';
+import { mapWristToRobo, applyExponentialSmoothing, detectFist, detectPalmOpen, isValidJointState, detectPeaceSign, detectThumbsUp } from '../utils/gestureMapping';
 import { BIMANUAL_CONFIG } from '../constants';
 
 export function useGestureMirror(externalState?: JointState, smoothingAlpha: number = 0.2, onEmergencyStop?: () => void, onEmergencyResume?: () => void) {
@@ -10,13 +10,13 @@ export function useGestureMirror(externalState?: JointState, smoothingAlpha: num
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const handsRef = useRef<Hands | null>(null);
   const cameraRef = useRef<Camera | null>(null);
-  const smoothedRef = useRef<JointState>({ j1: 90, j2: 90, j3: 90, j4: 0, fingerAngles: Array(5).fill(null).map(() => [0, 0, 0]), wristTilt: 0 });
+  const smoothedRef = useRef<JointState>({ j1: 90, j2: 135, j3: 45, j4: 0, fingerAngles: Array(5).fill(null).map(() => [0, 0, 0]), wristTilt: 0 });
   const lastGripperStateRef = useRef<number>(0);
   const safetyCooldownRef = useRef<number>(0);
   const lastLandmarksRef = useRef<any[] | null>(null);
   const isClutchActiveRef = useRef<boolean>(false);
 
-  const [jointAngles, setJointAngles] = useState<JointState>({ j1: 90, j2: 90, j3: 90, j4: 0, fingerAngles: Array(5).fill([0, 0, 0]), wristTilt: 0 });
+  const [jointAngles, setJointAngles] = useState<JointState>({ j1: 90, j2: 135, j3: 45, j4: 0, fingerAngles: Array(5).fill([0, 0, 0]), wristTilt: 0 });
   const [isTracking, setIsTracking] = useState(false);
   const [confidence, setConfidence] = useState(0);
   const [mode, setMode] = useState<GestureMode>('DISABLED');
@@ -69,12 +69,12 @@ export function useGestureMirror(externalState?: JointState, smoothingAlpha: num
         }
       }
 
-      // 3. Safety Gestures
+      // 3. Safety Gestures (Refined V3.0)
       if (Date.now() - safetyCooldownRef.current > 1000) {
-        if (detectPalmOpen(mainHand)) {
+        if (detectPeaceSign(mainHand)) {
           onEmergencyStop?.();
           safetyCooldownRef.current = Date.now();
-        } else if (detectFist(mainHand)) {
+        } else if (detectThumbsUp(mainHand)) {
           onEmergencyResume?.();
           safetyCooldownRef.current = Date.now();
         }

@@ -8,6 +8,7 @@ import {
   Box,
   Sphere,
   Environment as DreiEnvironment,
+  Text,
 } from '@react-three/drei';
 import * as THREE from 'three';
 import { SystemStatus, ViewMode, JointState, GestureMode } from '../types';
@@ -32,6 +33,8 @@ const COLOR_METAL = "#444444";
 const COLOR_HYDRAULIC = "#888888";
 
 const COLOR_HOLO_CYAN = "#00f0ff";
+const COLOR_HOLO_GOLD = "#ffd700";
+const COLOR_HOLO_PURPLE = "#bf00ff";
 const COLOR_HOLO_RED = "#ff003c";
 const COLOR_HOLO_DIM = "#003344";
 
@@ -117,9 +120,20 @@ const Robot: React.FC<{
 
       {/* ROTATING BASE PEDESTAL - [STATIC_POS, DYNAMIC_ROT] */}
       <group position={[0, 1.2, 0]} rotation={[0, -j1Rot, 0]}>
+        {isWireframe && (
+          <Text
+            position={[0, 0.8, 2]}
+            fontSize={0.4}
+            color={COLOR_HOLO_CYAN}
+            anchorX="center"
+            anchorY="middle"
+          >
+            j1
+          </Text>
+        )}
         {isWireframe ? (
           <Cylinder args={[1.5, 1.8, 1, 16]}>
-            <HoloMaterial color={holoMain} opacity={opacity * 0.3} />
+            <HoloMaterial color={COLOR_HOLO_CYAN} opacity={opacity * 0.3} />
           </Cylinder>
         ) : (
           <Cylinder args={[1.2, 1.4, 1, 32]}>
@@ -133,7 +147,7 @@ const Robot: React.FC<{
           <group rotation={[0, 0, Math.PI / 2]}>
              {isWireframe ? (
                <Cylinder args={[0.8, 0.8, 2.2, 8]}>
-                 <HoloMaterial color={holoMain} opacity={opacity} />
+                 <HoloMaterial color={COLOR_HOLO_CYAN} opacity={opacity} />
                </Cylinder>
              ) : (
                <group>
@@ -147,11 +161,22 @@ const Robot: React.FC<{
                </group>
              )}
           </group>
+          {isWireframe && (
+            <Text
+              position={[1.5, 0, 0]}
+              fontSize={0.4}
+              color={COLOR_HOLO_CYAN}
+              anchorX="center"
+              anchorY="middle"
+            >
+              j2
+            </Text>
+          )}
 
           {/* LOWER ARM (HYDRAULIC LOOK) */}
           <group position={[0, 1.5, 0]}>
             {isWireframe ? (
-              <Box args={[0.8, 3, 0.8]}><HoloMaterial color={holoMain} opacity={opacity * 0.4} /></Box>
+              <Box args={[0.8, 3, 0.8]}><HoloMaterial color={COLOR_HOLO_CYAN} opacity={opacity * 0.4} /></Box>
             ) : (
               <group>
                 <RoundedBox args={[0.7, 3.2, 1.2]} radius={0.05} smoothness={4}>
@@ -170,14 +195,25 @@ const Robot: React.FC<{
             <group position={[0, 1.6, 0]} rotation={[j3Rot, 0, 0]}>
               <group rotation={[0, 0, Math.PI / 2]}>
                 <Cylinder args={[0.5, 0.5, 1.4, 16]}>
-                   <meshStandardMaterial color={isWireframe ? holoMain : "#222"} transparent opacity={opacity} />
+                   <meshStandardMaterial color={isWireframe ? COLOR_HOLO_GOLD : "#222"} transparent opacity={opacity} wireframe={isWireframe} />
                 </Cylinder>
               </group>
+              {isWireframe && (
+                <Text
+                  position={[1, 0, 0]}
+                  fontSize={0.4}
+                  color={COLOR_HOLO_GOLD}
+                  anchorX="center"
+                  anchorY="middle"
+                >
+                  j3
+                </Text>
+              )}
               
               {/* UPPER ARM / FOREARM */}
               <group position={[0, 1.5, 0]}>
                 {isWireframe ? (
-                  <Cylinder args={[0.4, 0.5, 3, 12]}><HoloMaterial color={holoMain} opacity={opacity * 0.5} /></Cylinder>
+                  <Cylinder args={[0.4, 0.5, 3, 12]}><HoloMaterial color={COLOR_HOLO_GOLD} opacity={opacity * 0.5} /></Cylinder>
                 ) : (
                   <group>
                     <Cylinder args={[0.3, 0.4, 3, 24]}>
@@ -193,8 +229,19 @@ const Robot: React.FC<{
                 {/* WRIST / GRIPPER END EFFECTOR */}
                 <group position={[0, 1.5, 0]}>
                   <Sphere args={[0.45, 16, 16]}>
-                    <meshStandardMaterial color={isWireframe ? holoMain : "#111"} metalness={1} />
+                    <meshStandardMaterial color={isWireframe ? COLOR_HOLO_PURPLE : "#111"} metalness={1} wireframe={isWireframe} transparent={isWireframe} opacity={opacity} />
                   </Sphere>
+                  {isWireframe && (
+                    <Text
+                      position={[0.8, 0, 0]}
+                      fontSize={0.4}
+                      color={COLOR_HOLO_PURPLE}
+                      anchorX="center"
+                      anchorY="middle"
+                    >
+                      j4
+                    </Text>
+                  )}
 
                   {/* INDUSTRIAL GRIPPER */}
                   <group position={[0, 0.6, 0]}>
@@ -203,11 +250,11 @@ const Robot: React.FC<{
                         <group>
                            {/* Finger Clamp */}
                            <Box args={[0.15, 1, 0.4]}>
-                             <meshStandardMaterial color={COLOR_METAL} metalness={1} />
+                             <meshStandardMaterial color={isWireframe ? COLOR_HOLO_PURPLE : COLOR_METAL} metalness={1} wireframe={isWireframe} transparent={isWireframe} opacity={opacity} />
                            </Box>
                            {/* Yellow Tip */}
                            <Box args={[0.16, 0.2, 0.41]} position={[0, 0.4, 0]}>
-                             <meshStandardMaterial color={COLOR_ACCENT_REAL} />
+                             <meshStandardMaterial color={isWireframe ? COLOR_HOLO_PURPLE : COLOR_ACCENT_REAL} wireframe={isWireframe} transparent={isWireframe} opacity={opacity} />
                            </Box>
                         </group>
                       </group>
@@ -228,12 +275,20 @@ const Robot: React.FC<{
 const SceneObjects: React.FC<Viewport3DProps> = (props) => {
   const { viewMode, joints, ghostJoints, gestureMode } = props;
   const isWireframe = viewMode === 'wireframe';
-  const gridColor = isWireframe ? "#004455" : "#222";
+  const gridColor = isWireframe ? "rgba(102, 102, 102, 0.15)" : "rgba(34, 34, 34, 0.3)";
   const orbitRef = useRef<any>(null);
 
   return (
     <>
-      <Grid infiniteGrid fadeDistance={40} sectionColor={gridColor} cellColor={gridColor} sectionThickness={1.5} />
+      <Grid 
+        infiniteGrid 
+        fadeDistance={50} 
+        sectionColor={gridColor} 
+        cellColor={gridColor} 
+        sectionThickness={0.5} 
+        sectionSize={5}
+        cellSize={1}
+      />
       <Robot mode={viewMode} joints={joints} isCritical={props.status === SystemStatus.CRITICAL} hasPower={props.power} isTactileMode={props.isTactileMode} />
       {gestureMode === 'SHADOW' && ghostJoints && (
         <Robot mode={viewMode} joints={ghostJoints} isCritical={false} hasPower={true} isTactileMode={false} opacity={0.3} />
